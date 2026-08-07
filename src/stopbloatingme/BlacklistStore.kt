@@ -90,6 +90,12 @@ object BlacklistStore {
 
     fun count(category: Category): Int = ids(category).size
 
+    /** Every blocked id across all three categories -- what the reset button is offering to erase. */
+    fun totalCount(): Int = Category.entries.sumOf { count(it) }
+
+    /** Where the store lives, for the "this is shared by every save" note in the UI. */
+    fun location(): String = "saves/common/$COMMON_FILE"
+
     // --- Mutations -----------------------------------------------------------------------------
 
     /** Toggles one id. Returns the new state (true = now blacklisted). */
@@ -114,5 +120,21 @@ object BlacklistStore {
         val set = mutable(category)
         entries.forEach { set.remove(it.id) }
         save()
+    }
+
+    /**
+     * Erases the whole store: every category, back to nothing.
+     *
+     * This is the only way to undo choices made in an earlier session, because the store is shared
+     * by every save rather than living in one campaign. The file is overwritten with empty lists
+     * rather than deleted, so a partly-written file can never be left behind.
+     *
+     * The UI gates this behind a confirm step -- see the reset button in [BrowserPanel].
+     */
+    fun clearAll() {
+        ensureLoaded()
+        sets.values.forEach { it.clear() }
+        save()
+        log.info("StopBloatingMe: blacklist reset; ${location()} is now empty.")
     }
 }

@@ -93,6 +93,17 @@ object BrowserPanel {
      *  so we never mutate the UI tree from inside the engine's own button dispatch. */
     private var leftDirty = false
 
+    /**
+     * When the reset button was armed, as wall-clock millis. The store is shared by every save, so an
+     * accidental reset would erase work no single campaign could give back -- hence a deliberate
+     * two-click confirm that disarms itself after [RESET_ARM_WINDOW_MS] rather than a plain button.
+     * Wall clock rather than the advance delta so it can't be stretched by any time scaling.
+     */
+    private var resetArmedAt = 0L
+    private var lastResetArmed = false
+
+    private const val RESET_ARM_WINDOW_MS = 5_000L
+
     // --- Construction --------------------------------------------------------------------------
 
     fun create(screenPanel: UIPanelAPI): CustomPanelAPI {
@@ -182,6 +193,13 @@ object BrowserPanel {
         searchField?.let { field ->
             val text = field.text?.trim().orEmpty()
             if (text != filter.search) filter.search = text
+        }
+
+        // Repaint the reset button when its arm window lapses, so it can't sit there looking armed.
+        val armed = isResetArmed()
+        if (armed != lastResetArmed) {
+            lastResetArmed = armed
+            leftDirty = true
         }
 
         if (leftDirty) {
@@ -346,11 +364,62 @@ object BrowserPanel {
                     leftDirty = true
                 }
             }
+
+            buildResetSection(this, innerW)
         }
 
         // Tab labels carry blocked counts, so any bulk edit has to refresh them too.
         buildHeader()
     }
+
+    /**
+     * The "stored data" section: where the blacklist lives, and the button that erases it.
+     *
+     * Everything else in this panel is reversible by hand, but the store is shared by every save and
+     * survives restarts, so a session that starts with a full blacklist has no other way back to
+     * empty. The button arms on the first click and only erases on a second one within
+     * [RESET_ARM_WINDOW_MS]; it also states the exact number it is about to destroy, so the confirm
+     * carries real information rather than being a reflex click.
+     */
+    private fun buildResetSection(tooltip: TooltipMakerAPI, width: Float) = with(tooltip) {
+        val total = BlacklistStore.totalCount()
+        val armed = isResetArmed()
+
+        addSectionHeading("Stored choices", Alignment.MID, 14f)
+        addPara(
+            "Saved to %s and shared by every save, so this is the only way back to empty.",
+            4f, Misc.getGrayColor(), Misc.getHighlightColor(), BlacklistStore.location(),
+        )
+        addButton(
+            if (armed) "CONFIRM - ERASE ALL $total" else "Reset everything ($total)",
+            null,
+            if (armed) BLOCKED_COLOR else Misc.getBasePlayerColor(),
+            Misc.getDarkPlayerColor(),
+            Alignment.MID, CutStyle.TL_BR, width, 26f, 6f,
+        ).apply {
+            isEnabled = total > 0
+            onClick {
+                if (isResetArmed()) {
+                    BlacklistStore.clearAll()
+                    resetArmedAt = 0L
+                    blacklistStamp++
+                } else {
+                    resetArmedAt = System.currentTimeMillis()
+                }
+                leftDirty = true
+            }
+        }
+        if (armed) {
+            addPara(
+                "Click again to erase. Cancels itself in a few seconds.",
+                BLOCKED_COLOR, 4f,
+            )
+        }
+        Unit
+    }
+
+    private fun isResetArmed(): Boolean =
+        resetArmedAt != 0L && System.currentTimeMillis() - resetArmedAt < RESET_ARM_WINDOW_MS
 
     /** A facet group: one checkbox per value, in its own scroller so a 105-mod list stays compact. */
     private fun facetList(
