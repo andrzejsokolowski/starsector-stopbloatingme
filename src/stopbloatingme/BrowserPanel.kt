@@ -6,6 +6,7 @@ import com.fs.starfarer.api.ui.ButtonAPI
 import com.fs.starfarer.api.ui.CustomPanelAPI
 import com.fs.starfarer.api.ui.CutStyle
 import com.fs.starfarer.api.ui.LabelAPI
+import com.fs.starfarer.api.ui.ScrollPanelAPI
 import com.fs.starfarer.api.ui.TextFieldAPI
 import com.fs.starfarer.api.ui.TooltipMakerAPI
 import com.fs.starfarer.api.ui.UIPanelAPI
@@ -95,6 +96,15 @@ object BrowserPanel {
 
     private var leftDirty = false
 
+    /** The filter column's scroller, its content height, and where the player had it scrolled to.
+     *  The offset is preserved across rebuilds because *every* facet click rebuilds the column, and
+     *  being thrown back to the top on each click would make a long list unusable. */
+    private var leftScroller: ScrollPanelAPI? = null
+    private var leftContentHeight = 0f
+    private var leftScrollOffset = 0f
+
+    private const val LEFT_SCROLL_STEP = 60f
+
     /**
      * When the reset button was armed, as wall-clock millis. The store is shared by every save, so an
      * accidental reset would erase work no single campaign could give back -- hence a deliberate
@@ -141,8 +151,18 @@ object BrowserPanel {
 
             headerHost = CustomPanel(width - PAD * 2, HEADER_H) {}
                 .also { it.anchorInTopLeftOfParent(PAD, PAD) }
-            leftHost = CustomPanel(LEFT_W, bodyH) {}
-                .also { it.anchorInTopLeftOfParent(PAD, PAD + HEADER_H) }
+            leftHost = CustomPanel(LEFT_W, bodyH) { leftPlugin ->
+                // Drive the filter column's scroller ourselves rather than trusting the wheel to
+                // find it. Its content is arbitrarily tall -- every design type and all 105 source
+                // mods, expanded -- so this has to work whatever the engine routes where.
+                leftPlugin.onScroll { event ->
+                    val scroller = leftScroller ?: return@onScroll
+                    val step = if (event.eventValue > 0) -LEFT_SCROLL_STEP else LEFT_SCROLL_STEP
+                    val maxOffset = max(0f, leftContentHeight - leftHeight)
+                    leftScrollOffset = (scroller.yOffset + step).coerceIn(0f, maxOffset)
+                    scroller.yOffset = leftScrollOffset
+                }
+            }.also { it.anchorInTopLeftOfParent(PAD, PAD + HEADER_H) }
 
             val rightHost = CustomPanel(rightW, bodyH) {
                 colHeaderHost = CustomPanel(rightW, COL_HEADER_H) {}
@@ -182,6 +202,9 @@ object BrowserPanel {
         lastSignature = null
         renderedFirstRow = -1
         renderedCategory = null
+        leftScroller = null
+        leftContentHeight = 0f
+        leftScrollOffset = 0f
     }
 
     private fun resetView() {
@@ -189,6 +212,9 @@ object BrowserPanel {
         renderedFirstRow = -1
         lastSignature = null
         lastStamp = -1
+        // Switching tabs is a fresh set of facet groups; keeping the old offset would land you at an
+        // arbitrary point in a different column.
+        leftScrollOffset = 0f
     }
 
     // --- Per-frame -----------------------------------------------------------------------------
@@ -414,8 +440,12 @@ object BrowserPanel {
         val filter = FilterState.of(category)
         host.clearChildren()
 
+        // Remember the scroll position before the tree goes away, so a facet click doesn't yank the
+        // column back to the top.
+        leftScroller?.let { leftScrollOffset = it.yOffset }
+
         val innerW = LEFT_W - 20f
-        host.TooltipMakerPanel(LEFT_W - 4f, leftHeight, withScroller = true) {
+        val element = host.scrollingElement(LEFT_W - 4f, leftHeight) {
             setForceProcessInput(true)
 
             addSectionHeading("Search", Alignment.MID, 0f)
@@ -522,7 +552,30 @@ object BrowserPanel {
             buildResetSection(this, innerW)
         }
 
+        leftContentHeight = runCatching { element.heightSoFar }.getOrDefault(leftHeight)
+        leftScroller = element.externalScroller
+        leftScroller?.yOffset = leftScrollOffset.coerceIn(0f, max(0f, leftContentHeight - leftHeight))
+
         buildHeader()        // tab labels carry blocked counts
+    }
+
+    /**
+     * Adds a scrolling element the way the engine expects: **create, fill, then add**.
+     *
+     * The DSL's `TooltipMakerPanel` calls `addUIElement` before running its builder, so the scroller
+     * is wired up against content that is still empty and ends up with no scroll range at all. The
+     * overflow then draws straight past the panel edge, because Starsector panels don't clip -- only
+     * scrollers do. Filling before adding is what vanilla does everywhere and what makes it work.
+     */
+    private fun CustomPanelAPI.scrollingElement(
+        width: Float,
+        height: Float,
+        builder: TooltipMakerAPI.() -> Unit,
+    ): TooltipMakerAPI {
+        val element = createUIElement(width, height, true)
+        element.builder()
+        addUIElement(element).inTL(0f, 0f)
+        return element
     }
 
     /**
