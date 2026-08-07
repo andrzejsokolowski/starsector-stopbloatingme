@@ -1,0 +1,119 @@
+[center][size=28pt][url=https://github.com/andrzejsokolowski/starsector-stopbloatingme/releases/latest][b]StopBloatingMe[/b][/url][/size]
+[url=https://github.com/andrzejsokolowski/starsector-stopbloatingme/releases/latest][img]https://img.shields.io/github/downloads/andrzejsokolowski/starsector-stopbloatingme/total?style=for-the-badge&label=download[/img][/url]  [url=https://github.com/andrzejsokolowski/starsector-stopbloatingme][img]https://img.shields.io/github/v/release/andrzejsokolowski/starsector-stopbloatingme?display_name=tag&sort=semver&style=for-the-badge&label=source[/img][/url]
+[/center]
+[center][b]
+WHAT DOES THIS MOD DO?
+- Lists every ship, weapon and fighter in your install from the main menu, and lets you blacklist the ones you don't want to ever see again.
+
+
+
+Do you have 244 mods installed? Do you have 3294 ships? Do you need the 15th recolour of the Onslaught?
+No. You don't. Block it and never see it again.
+Is there a weapon in your modlist that is so comically overpowered that finding it for sale ruins the run?
+Block it from markets. It still spawns on ships, so nothing breaks and nothing crashes.
+
+
+
+Your choices are stored per installation, not per save. Curate your modlist once and every future playthrough inherits it.
+The code is fully open source. You don't have to credit me. Claude Code built this anyway.
+[color=red]Requires [b]LazyLib[/b].[/color]
+[/b][/center]
+[spoiler=Screenshots]
+[center][img]https://github.com/andrzejsokolowski/starsector-stopbloatingme/blob/main/bloat1.png?raw=true[/img]
+[img]https://github.com/andrzejsokolowski/starsector-stopbloatingme/blob/main/bloat2.png?raw=true[/img]
+[img]https://github.com/andrzejsokolowski/starsector-stopbloatingme/blob/main/bloat3.png?raw=true[/img][/center]
+[/spoiler]
+[center]
+[table]
+[tr]
+[td][hr][center][size=12pt][b]The Browser[/b][/size][/center][hr]
+[list]
+[li]Adds a [b]DE-BLOAT[/b] button to the bottom right of the main menu. No campaign needed, no save to load.[/li]
+[li]Three tabs: [b]Ships[/b], [b]Weapons[/b], [b]Fighters[/b], each showing everything your modlist defines with a live blocked count.[/li]
+[li][b]Click any row to toggle it.[/b] Blocked entries turn red. That's the whole interaction.[/li]
+[li][b]Hover preview[/b]: points at a row and shows you the actual sprite, plus its id, facets and source mod. Nobody remembers 3294 ship names, so you can block by silhouette instead.[/li]
+[li]Handles thousands of entries without a stutter. Rows are pooled and the whole catalogue is indexed once in about 5ms.[/li]
+[/list]
+[hr][center][size=12pt][b]The Filter Panel[/b][/size][/center][hr]
+[list]
+[li][b]Search[/b]: live, matches name, id, source mod and every facet value as you type.[/li]
+[li][b]Show[/b]: All / Allowed / Blocked, so you can review exactly what you've already killed.[/li]
+[li][b]Include stations, modules and built-ins[/b]: off by default, because you almost never want to see them.[/li]
+[li][b]Multi select facets[/b] with live counts, all generated from what you actually have installed:
+[list]
+[li][b]Ships[/b]: Size, Designation, Design type, Source mod.[/li]
+[li][b]Weapons[/b]: Type, Mount, Design type, Source mod.[/li]
+[li][b]Fighters[/b]: Role, Tier, Source mod.[/li]
+[/list][/li]
+[li]Groups collapse when they're long and everything scrolls, so a hundred source mods doesn't bury the rest.[/li]
+[li][b]Bulk actions[/b]: [i]Block shown[/i] and [i]Unblock shown[/i] act on whatever the current filter is showing. Filter to one mod's ships, one click, gone.[/li]
+[li][b]Reset filters[/b] clears the view. [b]Reset everything[/b] wipes the blacklist itself, behind a confirm click.[/li]
+[/list]
+[hr][center][size=12pt][b]What Blocking Actually Does[/b][/size][/center][hr]
+[list]
+[li][b]Ships are gone entirely.[/b] Removed from every faction's blueprints, so they stop spawning in fleets, stop being stocked in markets, and are hidden from the codex.[/li]
+[li][b]Weapons and fighters are gone from markets only.[/b] They stop being sold anywhere, but still spawn on ships that were designed with them. This is deliberate: fully removing a weapon breaks every variant that mounts it and crashes on load. This way nothing breaks.[/li]
+[li]Blocked entries are also hidden from the [b]codex[/b], all three categories.[/li]
+[li]Your storage is never touched. Only shops get swept.[/li]
+[/list]
+[hr][center][size=12pt][b]Storage[/b][/size][/center][hr]
+[list]
+[li]Saved to [b]saves/common/stopbloatingme/blacklist.json[/b], shared by every save you ever make.[/li]
+[li]Nothing is ever written into a savegame, so adding or removing the mod can't corrupt one.[/li]
+[li]Stored as plain ids. Disabling a mod leaves its blocked ids untouched, and they start applying again the moment you turn it back on.[/li]
+[/list]
+[/td][/tr][/table][/center]
+[spoiler=FAQ]
+[b]Can I add or remove it mid save?[/b]
+Yes, both. Nothing of this mod is ever written into your save. Removing it simply gives you everything back.
+[b]Do I need to start a new game?[/b]
+No. Blocks apply to any save the moment you load it.
+[b]I blocked a ship but I still see it in a fleet.[/b]
+Fleets that already existed in your save keep the ships they were generated with. Newly generated fleets respect the block. Give it a little time, or a little violence.
+[b]Does this delete anything?[/b]
+No. Nothing is deleted, no files are edited, no specs are unloaded. Blocked things are only prevented from being offered to you. Unblock and they come straight back.
+[b]Why can't I block weapons from spawning on ships too?[/b]
+Because that crashes the game on load. Every predefined ship loadout references its weapons by id, so removing one entirely leaves dangling references across your whole modlist. Blocking them from markets gets you the result you actually wanted without the crash.
+[b]Why do blocked things still show in the codex until I restart?[/b]
+The codex is built once when the game launches. Block something, and it's hidden from the codex the next time you start the game.
+[b]Performance?[/b]
+Negligible. The catalogue is indexed once at about 5ms. Enforcement is a handful of set operations per faction on load and once a day after that.
+[b]Does it work with modded content?[/b]
+That's the entire point. Every facet is generated from your installed mods, and source mod attribution comes straight from the spec, so it scales with however many mods you're running.
+[b]What about (D) hulls?[/b]
+They're deliberately not listed. Blocking a base hull already stops its (D) version, and blocking a (D) hull on its own could never do anything, so listing them would just be a button that doesn't work.
+[/spoiler]
+[spoiler=Version log]
+0.7.1
+Added Version Checker support and a direct download link.
+
+0.7.0
+Blocked weapons and fighters are now hidden from the codex too, using the game's own hide tag. Ships that mount a hidden weapon keep a fully working codex entry.
+
+0.6.0
+The big one: blocking now actually works in-game. Blocked ships stop spawning in fleets and markets and are hidden from the codex. Blocked weapons and fighters stop appearing in any market's stock while still spawning on ships. Your storage is never touched and nothing is written to the save.
+
+0.5.0
+Added the hover preview. Point at any row and see the actual sprite along with its id, facets and source mod.
+
+0.4.3
+Facet lists are now alphabetical, except size and mount which keep their real order.
+
+0.4.2
+Fixed the filter column not scrolling.
+
+0.4.1
+Auto-generated (D) hulls no longer clutter the list.
+
+0.4.0
+Fixed column alignment, filter scrolling and facet group sizing. Added Reset filters.
+
+0.3.0
+Added the reset button for the shared blacklist.
+
+0.2.0
+The real browser: three tabs, filters, search, bulk actions, pooled rows.
+
+0.1.1
+Initial build. Main menu button and the catalogue index.
+[/spoiler]
