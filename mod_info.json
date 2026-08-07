@@ -3,7 +3,7 @@
   "name": "StopBloatingMe",
   "author": "Oddisz",
   "utility": "true",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Browse every ship, weapon and fighter in your install from the main menu, and blacklist the ones you don't want. Blacklisted ships stop spawning in fleets and markets and are hidden from the codex; blacklisted weapons and fighters stop appearing in markets but still spawn on ships, so nothing breaks. Filter by size, designation, source mod and design type.",
   "gameVersion": "0.98a-RC8",
   "jars": ["jars/StopBloatingMe.jar"],

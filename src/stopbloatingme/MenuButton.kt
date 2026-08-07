@@ -69,6 +69,7 @@ object MenuButton {
         buttonPanel = null
         openPanel = null
         host = null
+        BrowserPanel.dispose()
     }
 
     private fun toggle(screenPanel: UIPanelAPI) {
@@ -76,8 +77,12 @@ object MenuButton {
     }
 
     private fun open(screenPanel: UIPanelAPI) {
-        openPanel = runCatching { SpikePanel.create(screenPanel) }
-            .onFailure { Global.getLogger(MenuButton::class.java).error("StopBloatingMe: panel failed to open.", it) }
+        openPanel = runCatching { BrowserPanel.create(screenPanel) }
+            .onFailure {
+                Global.getLogger(MenuButton::class.java)
+                    .error("StopBloatingMe: browser failed to open.", it)
+                BrowserPanel.dispose()
+            }
             .getOrNull()
     }
 
@@ -85,5 +90,6 @@ object MenuButton {
         val panel = openPanel ?: return
         openPanel = null
         runCatching { host?.removeComponent(panel) }
+        BrowserPanel.dispose()
     }
 }
