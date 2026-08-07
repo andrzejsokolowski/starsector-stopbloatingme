@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '2.1.20'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+// We compile both Java and Kotlin from the same 'src' tree (Starsector convention).
+sourceSets.main.java.srcDirs = ['src']
+sourceSets.main.kotlin.srcDirs = ['src']
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Starsector core (obfuscated game classes + bundled libs)
+    compileOnly fileTree(dir: "${starsectorPath}/starsector-core", include: '*.jar')
+
+    // Library mods we depend on
+    compileOnly fileTree(dir: "${starsectorPath}/mods/LunaLib-2.0.5/jars", include: '*.jar')
+    compileOnly fileTree(dir: "${starsectorPath}/mods/LazyLib-3.0.0/jars", include: '*.jar')
+
+    // Kotlin runtime is provided AT RUNTIME by LazyLib (jars/internal/Kotlin-Runtime.jar) on
+    // Starsector's shared classloader, so we compile against it but must NOT bundle our own copy.
+    // kotlin.stdlib.default.dependency=false (in gradle.properties) prevents the plugin from adding one.
+    compileOnly files("${starsectorPath}/mods/LazyLib-3.0.0/jars/internal/Kotlin-Runtime.jar")
+}
+
+jar {
+    destinationDirectory = file('jars')
+    archiveFileName = 'StopBloatingMe.jar'
+    // Do not embed the Kotlin stdlib — LazyLib provides it. This keeps the jar small and
+    // avoids classloader conflicts with other Kotlin mods.
+}

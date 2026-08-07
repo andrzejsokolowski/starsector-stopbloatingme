@@ -1,0 +1,9 @@
+{
+	# Merged into the core settings.json "plugins" map. Every EveryFrameCombatPlugin listed here is
+	# added to every combat engine -- including the one the title screen runs behind the main menu,
+	# which is how we get a per-frame tick there to inject our button. Same mechanism FleetBuilder
+	# uses for its title-screen autofit button.
+	"plugins": {
+		"stopBloatingMeTitleHook": "stopbloatingme.TitleScreenHook",
+	},
+}
