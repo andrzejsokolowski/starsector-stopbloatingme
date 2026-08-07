@@ -117,12 +117,38 @@ object FilterState {
         return out
     }
 
+    // --- Collapsible facet groups --------------------------------------------------------------
+
+    /** Above this many values a group starts folded, so one long group can't bury the ones below it. */
+    private const val COLLAPSE_THRESHOLD = 12
+
+    private val collapsed = HashMap<Pair<Category, FacetGroup>, Boolean>()
+
+    fun isCollapsed(category: Category, group: FacetGroup): Boolean =
+        collapsed.getOrPut(category to group) {
+            facetValues(category, group).size > COLLAPSE_THRESHOLD
+        }
+
+    fun toggleCollapsed(category: Category, group: FacetGroup) {
+        collapsed[category to group] = !isCollapsed(category, group)
+    }
+
+    // --- Facet values --------------------------------------------------------------------------
+
+    private val facetCache = HashMap<Pair<Category, FacetGroup>, List<Pair<String, Int>>>()
+
     /**
      * Distinct values of [group] within [category], each with how many entries carry it, ordered for
      * display. Size and mount-size get their natural order; everything else falls back to
      * most-common-first so the values worth clicking float to the top of a long list.
+     *
+     * Cached: the index is immutable for the process, and this runs on every left-column rebuild
+     * (which happens on every facet click).
      */
-    fun facetValues(category: Category, group: FacetGroup): List<Pair<String, Int>> {
+    fun facetValues(category: Category, group: FacetGroup): List<Pair<String, Int>> =
+        facetCache.getOrPut(category to group) { computeFacetValues(category, group) }
+
+    private fun computeFacetValues(category: Category, group: FacetGroup): List<Pair<String, Int>> {
         val counts = LinkedHashMap<String, Int>()
         for (entry in ContentIndex.entries(category)) {
             if (entry.hidden) continue          // facet lists describe the default view

@@ -5,6 +5,7 @@ import com.fs.starfarer.api.ui.Alignment
 import com.fs.starfarer.api.ui.ButtonAPI
 import com.fs.starfarer.api.ui.CustomPanelAPI
 import com.fs.starfarer.api.ui.CutStyle
+import com.fs.starfarer.api.ui.LabelAPI
 import com.fs.starfarer.api.ui.TextFieldAPI
 import com.fs.starfarer.api.ui.TooltipMakerAPI
 import com.fs.starfarer.api.ui.UIPanelAPI
@@ -12,6 +13,7 @@ import com.fs.starfarer.api.util.Misc
 import org.lwjgl.input.Keyboard
 import org.lwjgl.opengl.GL11
 import stopbloatingme.uiframework.CustomPanel
+import stopbloatingme.uiframework.Font
 import stopbloatingme.uiframework.TooltipMakerPanel
 import stopbloatingme.uiframework.anchorInCenterOfParent
 import stopbloatingme.uiframework.anchorInTopLeftOfParent
@@ -19,9 +21,9 @@ import stopbloatingme.uiframework.bottom
 import stopbloatingme.uiframework.clearChildren
 import stopbloatingme.uiframework.drawBorder
 import stopbloatingme.uiframework.getFontPath
-import stopbloatingme.uiframework.Font
 import stopbloatingme.uiframework.left
 import stopbloatingme.uiframework.onClick
+import stopbloatingme.uiframework.opacity
 import stopbloatingme.uiframework.right
 import stopbloatingme.uiframework.top
 import java.awt.Color
@@ -33,15 +35,16 @@ import kotlin.math.min
  * The browser: three tabs of every ship, weapon and fighter your mod list defines, with search,
  * facet filters and bulk blacklisting.
  *
- * **The list is virtualised.** With 8,644 hulls in one tab, handing the engine one component per
- * entry is not an option -- it would hang for seconds and hold thousands of live widgets. Instead we
- * render exactly the rows that fit on screen (about 30) and drive a [firstRow] cursor from the mouse
- * wheel ourselves, rebuilding that small window only when the cursor or the filter actually moves.
- * Cost is therefore constant no matter how large the catalogue gets. Facet lists get real components
- * per value, which is fine -- the biggest of them is ~105 source mods, not thousands.
+ * Two things drive the design here.
  *
- * Rows use Victor 14, a monospaced font, so the columns line up from padded text without needing a
- * component per cell.
+ * **The list is virtualised and pooled.** With 3,294 browsable hulls in one tab, a component per
+ * entry is not an option. We build exactly the rows that fit on screen (about 30) *once*, then
+ * scrolling only rebinds their text -- no components are created or destroyed as you scroll, so the
+ * cost is flat regardless of catalogue size or scroll speed.
+ *
+ * **Columns are real components, not padded text.** The first cut padded a single string per row and
+ * relied on Victor being monospaced; it isn't, and the columns came out ragged. Each cell is now its
+ * own positioned label, truncated to its own width, so alignment holds for any font.
  */
 object BrowserPanel {
 
@@ -50,54 +53,52 @@ object BrowserPanel {
     private const val PAD = 12f
     private const val GAP = 12f
     private const val HEADER_H = 40f
-    private const val LEFT_W = 330f
+    private const val LEFT_W = 340f
     private const val ROW_H = 22f
     private const val COL_HEADER_H = 22f
     private const val FOOTER_H = 26f
-    private const val FACET_GROUP_H = 132f
+    private const val CELL_PAD = 6f
+    private const val CELL_TEXT_Y = 3f
 
-    /** Column widths of a row, in monospace characters. */
-    private const val COL_NAME = 34
-    private const val COL_PRIMARY = 11
-    private const val COL_SECONDARY = 18
-    private const val COL_DESIGN = 16
-    private const val COL_MOD = 24
+    /** Share of the list width each column gets. Name is widest; source mod is second, because with
+     *  244 mods installed that is the column you actually read. */
+    private val COLUMN_WEIGHTS = floatArrayOf(0.31f, 0.09f, 0.17f, 0.19f, 0.24f)
 
     private val BLOCKED_COLOR = Color(235, 90, 90)
 
-    // --- Live panel state --------------------------------------------------------------------
+    // --- Live panel state ----------------------------------------------------------------------
 
     private var leftHost: CustomPanelAPI? = null
     private var listHost: CustomPanelAPI? = null
     private var footerHost: CustomPanelAPI? = null
     private var headerHost: CustomPanelAPI? = null
+    private var colHeaderHost: CustomPanelAPI? = null
     private var searchField: TextFieldAPI? = null
 
     private var listWidth = 0f
     private var listHeight = 0f
     private var headerWidth = 0f
+    private var leftHeight = 0f
     private var visibleRows = 1
+    private var columnWidths = FloatArray(0)
+
+    private val rows = ArrayList<RowView>()
 
     private var filtered: List<Entry> = emptyList()
     private var firstRow = 0
 
-    /** Last filter fingerprint we filtered against; a change re-filters and scrolls back to the top. */
     private var lastSignature: String? = null
-
-    /** Bumped on every blacklist edit so the list re-filters and repaints without a signature change. */
     private var blacklistStamp = 0
     private var lastStamp = -1
     private var renderedFirstRow = -1
+    private var renderedCategory: Category? = null
 
-    /** Set when a facet/tab click needs the left column rebuilt; done in advance(), not in the click,
-     *  so we never mutate the UI tree from inside the engine's own button dispatch. */
     private var leftDirty = false
 
     /**
      * When the reset button was armed, as wall-clock millis. The store is shared by every save, so an
      * accidental reset would erase work no single campaign could give back -- hence a deliberate
-     * two-click confirm that disarms itself after [RESET_ARM_WINDOW_MS] rather than a plain button.
-     * Wall clock rather than the advance delta so it can't be stretched by any time scaling.
+     * two-click confirm that disarms itself after [RESET_ARM_WINDOW_MS].
      */
     private var resetArmedAt = 0L
     private var lastResetArmed = false
@@ -108,29 +109,25 @@ object BrowserPanel {
 
     fun create(screenPanel: UIPanelAPI): CustomPanelAPI {
         val settings = Global.getSettings()
-        val width = min(1360f, settings.screenWidth - 120f)
-        val height = min(820f, settings.screenHeight - 120f)
+        val width = min(1500f, settings.screenWidth - 100f)
+        val height = min(900f, settings.screenHeight - 100f)
 
         val bodyH = height - PAD * 2 - HEADER_H
         val rightW = width - PAD * 2 - LEFT_W - GAP
         headerWidth = width - PAD * 2
+        leftHeight = bodyH
         listWidth = rightW
         listHeight = bodyH - COL_HEADER_H - FOOTER_H
         visibleRows = max(1, floor(listHeight / ROW_H).toInt())
+        columnWidths = FloatArray(COLUMN_WEIGHTS.size) { COLUMN_WEIGHTS[it] * rightW }
 
         resetView()
 
         val panel = screenPanel.CustomPanel(width, height) { plugin ->
             plugin.renderBelow { alpha -> drawBackdrop(plugin.customPanel, alpha) }
-            plugin.onScroll { event ->
-                // Negative scroll amount is "wheel down" == further into the list.
-                val direction = if (event.eventValue > 0) -1 else 1
-                scrollBy(direction * 3)
-            }
             plugin.onKeyDown { event ->
-                // Home/End/PageUp/PageDown are also text-editing keys, so they only scroll the list
-                // when the search box doesn't have the caret -- otherwise typing a query would yank
-                // the list around underneath you. Escape always closes.
+                // Home/End/PageUp/PageDown are also text-editing keys, so they only move the list
+                // when the search box doesn't have the caret. Escape always closes.
                 val typing = searchField?.hasFocus() == true
                 when (event.eventValue) {
                     Keyboard.KEY_ESCAPE -> MenuButton.close()
@@ -148,11 +145,16 @@ object BrowserPanel {
                 .also { it.anchorInTopLeftOfParent(PAD, PAD + HEADER_H) }
 
             val rightHost = CustomPanel(rightW, bodyH) {
-                CustomPanel(rightW, COL_HEADER_H) {}
+                colHeaderHost = CustomPanel(rightW, COL_HEADER_H) {}
                     .also { it.anchorInTopLeftOfParent(0f, 0f) }
-                    .also { buildColumnHeader(it, rightW) }
-                listHost = CustomPanel(rightW, listHeight) {}
-                    .also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H) }
+                listHost = CustomPanel(rightW, listHeight) { listPlugin ->
+                    // Scrolling is bound to the list panel, NOT the whole browser: when it lived on
+                    // the root it swallowed the wheel everywhere, including over the filter column,
+                    // which is why the left side couldn't be scrolled at all.
+                    listPlugin.onScroll { event ->
+                        scrollBy(if (event.eventValue > 0) -3 else 3)
+                    }
+                }.also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H) }
                 footerHost = CustomPanel(rightW, FOOTER_H) {}
                     .also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H + listHeight) }
             }
@@ -161,21 +163,25 @@ object BrowserPanel {
         panel.anchorInCenterOfParent()
 
         buildHeader()
+        buildColumnHeader()
+        buildRowPool()
         buildLeft()
         refilter(resetScroll = true)
         return panel
     }
 
-    /** Called when the panel is torn down, so stale component references can't outlive it. */
     fun dispose() {
         leftHost = null
         listHost = null
         footerHost = null
         headerHost = null
+        colHeaderHost = null
         searchField = null
+        rows.clear()
         filtered = emptyList()
         lastSignature = null
         renderedFirstRow = -1
+        renderedCategory = null
     }
 
     private fun resetView() {
@@ -195,7 +201,6 @@ object BrowserPanel {
             if (text != filter.search) filter.search = text
         }
 
-        // Repaint the reset button when its arm window lapses, so it can't sit there looking armed.
         val armed = isResetArmed()
         if (armed != lastResetArmed) {
             lastResetArmed = armed
@@ -207,6 +212,11 @@ object BrowserPanel {
             buildLeft()
         }
 
+        if (renderedCategory != FilterState.category) {
+            renderedCategory = FilterState.category
+            buildColumnHeader()
+        }
+
         val signature = filter.signature()
         if (signature != lastSignature) {
             refilter(resetScroll = true)
@@ -216,7 +226,7 @@ object BrowserPanel {
             refilter(resetScroll = false)
         }
 
-        if (firstRow != renderedFirstRow) rebuildRows()
+        if (firstRow != renderedFirstRow) bindRows()
     }
 
     private fun refilter(resetScroll: Boolean) {
@@ -226,7 +236,8 @@ object BrowserPanel {
         lastStamp = blacklistStamp
         if (resetScroll) firstRow = 0
         clampScroll()
-        renderedFirstRow = -1        // force a row rebuild even if the cursor didn't move
+        renderedFirstRow = -1
+        bindRows()
         buildFooter()
     }
 
@@ -236,8 +247,116 @@ object BrowserPanel {
     }
 
     private fun clampScroll() {
-        val maxFirst = max(0, filtered.size - visibleRows)
-        firstRow = firstRow.coerceIn(0, maxFirst)
+        firstRow = firstRow.coerceIn(0, max(0, filtered.size - visibleRows))
+    }
+
+    // --- Rows ----------------------------------------------------------------------------------
+
+    /** One reusable row: a full-width click target plus one positioned label per column. */
+    private class RowView(
+        val panel: CustomPanelAPI,
+        val button: ButtonAPI,
+        val cells: List<Cell>,
+    ) {
+        var entry: Entry? = null
+
+        fun bind(entry: Entry?, blocked: Boolean) {
+            this.entry = entry
+            if (entry == null) {
+                panel.opacity = 0f
+                cells.forEach { it.set("", Misc.getBasePlayerColor()) }
+                button.isChecked = false
+                return
+            }
+            panel.opacity = 1f
+            button.isChecked = blocked
+            val color = if (blocked) BLOCKED_COLOR else Misc.getBasePlayerColor()
+            cells[0].set(entry.name, color)
+            cells[1].set(entry.primary, color)
+            cells[2].set(entry.secondary, color)
+            cells[3].set(entry.design, color)
+            cells[4].set(entry.sourceMod, color)
+        }
+    }
+
+    /** One column of one row. Truncates to its own pixel width, so long mod names get ".." rather
+     *  than being silently chopped mid-word by the column that follows. */
+    private class Cell(
+        private val tooltip: TooltipMakerAPI,
+        private val label: LabelAPI,
+        private val maxWidth: Float,
+    ) {
+        fun set(text: String, color: Color) {
+            label.text = truncate(text)
+            label.color = color
+        }
+
+        private fun truncate(text: String): String {
+            if (text.isEmpty()) return ""
+            val full = runCatching { tooltip.computeStringWidth(text) }.getOrDefault(0f)
+            if (full <= maxWidth || full <= 0f) return text
+            // Proportional first guess, then walk down; converges in a couple of steps instead of
+            // one computeStringWidth call per character.
+            var keep = (text.length * maxWidth / full).toInt().coerceIn(1, text.length)
+            while (keep > 1 && tooltip.computeStringWidth(text.take(keep) + "..") > maxWidth) keep--
+            return text.take(keep) + ".."
+        }
+    }
+
+    private fun buildRowPool() {
+        val host = listHost ?: return
+        host.clearChildren()
+        rows.clear()
+        for (i in 0 until visibleRows) rows += createRow(host, i * ROW_H)
+    }
+
+    private fun createRow(host: CustomPanelAPI, y: Float): RowView {
+        var button: ButtonAPI? = null
+        val cells = ArrayList<Cell>()
+
+        val rowPanel = host.CustomPanel(listWidth, ROW_H) {
+            TooltipMakerPanel(listWidth, ROW_H) {
+                // Empty label: this checkbox is only the click target and the selected-state tint.
+                button = addAreaCheckbox(
+                    "", null,
+                    Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
+                    listWidth, ROW_H, 0f,
+                )
+            }
+            var x = 0f
+            for (columnWidth in columnWidths) {
+                var tooltip: TooltipMakerAPI? = null
+                var label: LabelAPI? = null
+                val cellPanel = CustomPanel(columnWidth, ROW_H) {
+                    tooltip = TooltipMakerPanel(columnWidth, ROW_H) {
+                        // A space rather than "": an empty para can come back sized to nothing, and
+                        // the label has to survive being re-texted on every bind.
+                        label = addPara(" ", Misc.getBasePlayerColor(), 0f)
+                    }
+                }
+                cellPanel.anchorInTopLeftOfParent(x + CELL_PAD, CELL_TEXT_Y)
+                cells += Cell(tooltip!!, label!!, columnWidth - CELL_PAD * 2)
+                x += columnWidth
+            }
+        }
+        rowPanel.anchorInTopLeftOfParent(0f, y)
+
+        val view = RowView(rowPanel, button!!, cells)
+        view.button.onClick {
+            val entry = view.entry ?: return@onClick     // an empty row past the end of the list
+            BlacklistStore.toggle(FilterState.category, entry.id)
+            blacklistStamp++
+        }
+        return view
+    }
+
+    private fun bindRows() {
+        val blacklist = BlacklistStore.ids(FilterState.category)
+        for ((offset, row) in rows.withIndex()) {
+            val entry = filtered.getOrNull(firstRow + offset)
+            row.bind(entry, entry != null && blacklist.contains(entry.id))
+        }
+        renderedFirstRow = firstRow
     }
 
     // --- Header --------------------------------------------------------------------------------
@@ -266,17 +385,24 @@ object BrowserPanel {
         host.smallButton(headerWidth - 110f, 0f, 110f, HEADER_H - 6f, "CLOSE") { MenuButton.close() }
     }
 
-    private fun buildColumnHeader(host: CustomPanelAPI, width: Float) {
-        host.clearChildren()
+    /** Column titles, positioned with the same widths as the row cells so they stay in step. */
+    private fun buildColumnHeader() {
+        val host = colHeaderHost ?: return
         val category = FilterState.category
-        host.TooltipMakerPanel(width, COL_HEADER_H) {
-            setParaFontVictor14()
-            val text = fit("Name", COL_NAME) +
-                fit(category.primaryLabel, COL_PRIMARY) +
-                fit(category.secondaryLabel, COL_SECONDARY) +
-                fit(category.designLabel ?: "", COL_DESIGN) +
-                fit("Source mod", COL_MOD)
-            addPara(text, Misc.getGrayColor(), 0f)
+        host.clearChildren()
+
+        val titles = listOf(
+            "Name", category.primaryLabel, category.secondaryLabel,
+            category.designLabel ?: "", "Source mod",
+        )
+        var x = 0f
+        for ((index, columnWidth) in columnWidths.withIndex()) {
+            host.CustomPanel(columnWidth, COL_HEADER_H) {
+                TooltipMakerPanel(columnWidth, COL_HEADER_H) {
+                    addPara(titles[index], Misc.getGrayColor(), 0f)
+                }
+            }.anchorInTopLeftOfParent(x + CELL_PAD, 4f)
+            x += columnWidth
         }
     }
 
@@ -288,8 +414,8 @@ object BrowserPanel {
         val filter = FilterState.of(category)
         host.clearChildren()
 
-        val innerW = LEFT_W - 8f
-        host.TooltipMakerPanel(innerW, host.position.height, withScroller = true) {
+        val innerW = LEFT_W - 20f
+        host.TooltipMakerPanel(LEFT_W - 4f, leftHeight, withScroller = true) {
             setForceProcessInput(true)
 
             addSectionHeading("Search", Alignment.MID, 0f)
@@ -319,6 +445,20 @@ object BrowserPanel {
                 }
             }
 
+            // Near the top on purpose: with the facet groups expanded the column gets long, and a
+            // reset you have to hunt for is a reset you don't use.
+            addButton(
+                "Reset filters", null,
+                Misc.getBrightPlayerColor(), Misc.getDarkPlayerColor(),
+                Alignment.MID, CutStyle.TL_BR, innerW, 24f, 6f,
+            ).apply {
+                isEnabled = filter.isNarrowing()
+                onClick {
+                    filter.clear()
+                    leftDirty = true
+                }
+            }
+
             for (group in FacetGroup.entries) {
                 val heading = when (group) {
                     FacetGroup.PRIMARY -> category.primaryLabel
@@ -330,11 +470,36 @@ object BrowserPanel {
                 if (values.isEmpty()) continue
 
                 val chosen = filter.of(group)
-                addSectionHeading(
-                    if (chosen.isEmpty()) heading else "$heading  (${chosen.size})",
-                    Alignment.MID, 10f,
-                )
-                addCustom(facetList(innerW, values, chosen), 4f)
+                val folded = FilterState.isCollapsed(category, group)
+                val marker = if (folded) "[+]" else "[-]"
+                val chosenNote = if (chosen.isEmpty()) "" else "  (${chosen.size} of ${values.size})"
+
+                // The heading is the fold control. Groups render at their natural height with no
+                // inner scroller -- nested scrollers ate the wheel and a fixed height both cropped
+                // long groups and wasted space on short ones (Mount has three values, not twelve).
+                addAreaCheckbox(
+                    "$marker $heading$chosenNote", null,
+                    Misc.getBrightPlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
+                    innerW, 22f, 10f, true,
+                ).onClick {
+                    FilterState.toggleCollapsed(category, group)
+                    leftDirty = true
+                }
+                if (folded) continue
+
+                for ((value, count) in values) {
+                    addAreaCheckbox(
+                        "$value  ($count)", null,
+                        Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
+                        innerW, 20f, 2f, true,
+                    ).apply {
+                        isChecked = chosen.contains(value)
+                        onClick {
+                            if (!chosen.remove(value)) chosen.add(value)
+                            leftDirty = true
+                        }
+                    }
+                }
             }
 
             addSectionHeading("Bulk", Alignment.MID, 12f)
@@ -353,33 +518,19 @@ object BrowserPanel {
                 )),
                 4f,
             )
-            addButton(
-                "Clear filters", null,
-                Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(),
-                Alignment.MID, CutStyle.TL_BR, innerW, 24f, 6f,
-            ).apply {
-                isEnabled = filter.isNarrowing()
-                onClick {
-                    filter.clear()
-                    leftDirty = true
-                }
-            }
 
             buildResetSection(this, innerW)
         }
 
-        // Tab labels carry blocked counts, so any bulk edit has to refresh them too.
-        buildHeader()
+        buildHeader()        // tab labels carry blocked counts
     }
 
     /**
      * The "stored data" section: where the blacklist lives, and the button that erases it.
      *
-     * Everything else in this panel is reversible by hand, but the store is shared by every save and
-     * survives restarts, so a session that starts with a full blacklist has no other way back to
-     * empty. The button arms on the first click and only erases on a second one within
-     * [RESET_ARM_WINDOW_MS]; it also states the exact number it is about to destroy, so the confirm
-     * carries real information rather than being a reflex click.
+     * The store is shared by every save and survives restarts, so a session that starts with a full
+     * blacklist has no other way back to empty. The button arms on the first click and only erases on
+     * a second one within [RESET_ARM_WINDOW_MS], stating the exact number it is about to destroy.
      */
     private fun buildResetSection(tooltip: TooltipMakerAPI, width: Float) = with(tooltip) {
         val total = BlacklistStore.totalCount()
@@ -410,90 +561,13 @@ object BrowserPanel {
             }
         }
         if (armed) {
-            addPara(
-                "Click again to erase. Cancels itself in a few seconds.",
-                BLOCKED_COLOR, 4f,
-            )
+            addPara("Click again to erase. Cancels itself in a few seconds.", BLOCKED_COLOR, 4f)
         }
         Unit
     }
 
     private fun isResetArmed(): Boolean =
         resetArmedAt != 0L && System.currentTimeMillis() - resetArmedAt < RESET_ARM_WINDOW_MS
-
-    /** A facet group: one checkbox per value, in its own scroller so a 105-mod list stays compact. */
-    private fun facetList(
-        width: Float,
-        values: List<Pair<String, Int>>,
-        chosen: MutableSet<String>,
-    ): CustomPanelAPI {
-        val panel = Global.getSettings().createCustom(width, FACET_GROUP_H, null)
-        panel.TooltipMakerPanel(width, FACET_GROUP_H, withScroller = true) {
-            for ((value, count) in values) {
-                addAreaCheckbox(
-                    "$value  ($count)", null,
-                    Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
-                    width - 18f, 20f, 2f, true,
-                ).apply {
-                    isChecked = chosen.contains(value)
-                    onClick {
-                        if (!chosen.remove(value)) chosen.add(value)
-                        leftDirty = true
-                    }
-                }
-            }
-        }
-        return panel
-    }
-
-    // --- List ----------------------------------------------------------------------------------
-
-    private fun rebuildRows() {
-        val host = listHost ?: return
-        val category = FilterState.category
-        val blacklist = BlacklistStore.ids(category)
-
-        host.clearChildren()
-        renderedFirstRow = firstRow
-
-        val last = min(filtered.size, firstRow + visibleRows)
-        host.TooltipMakerPanel(listWidth, listHeight) {
-            setParaFontVictor14()
-            if (filtered.isEmpty()) {
-                addPara("Nothing matches these filters.", Misc.getGrayColor(), 4f)
-                return@TooltipMakerPanel
-            }
-            for (i in firstRow until last) {
-                val entry = filtered[i]
-                val blocked = blacklist.contains(entry.id)
-                addAreaCheckbox(
-                    rowText(entry), null,
-                    if (blocked) BLOCKED_COLOR else Misc.getBasePlayerColor(),
-                    Misc.getDarkPlayerColor(),
-                    if (blocked) BLOCKED_COLOR else Misc.getBrightPlayerColor(),
-                    listWidth - 4f, ROW_H - 2f, 0f, true,
-                ).apply {
-                    isChecked = blocked
-                    onClick {
-                        BlacklistStore.toggle(category, entry.id)
-                        blacklistStamp++
-                    }
-                }
-            }
-        }
-    }
-
-    private fun rowText(entry: Entry): String =
-        fit(entry.name, COL_NAME) +
-            fit(entry.primary, COL_PRIMARY) +
-            fit(entry.secondary, COL_SECONDARY) +
-            fit(entry.design, COL_DESIGN) +
-            fit(entry.sourceMod, COL_MOD)
-
-    /** Pads or truncates to exactly [width] monospace characters, always leaving a trailing space. */
-    private fun fit(text: String, width: Int): String =
-        if (text.length >= width) text.take(width - 1) + " "
-        else text + " ".repeat(width - text.length)
 
     // --- Footer --------------------------------------------------------------------------------
 
@@ -529,7 +603,6 @@ object BrowserPanel {
         return panel
     }
 
-    /** A toggle-looking button: an area checkbox sized to its own host panel. */
     private fun UIPanelAPI.tab(
         x: Float, y: Float, width: Float, height: Float,
         label: String, active: Boolean, onPress: () -> Unit,
