@@ -14,6 +14,7 @@ import com.fs.starfarer.api.util.Misc
 import org.lwjgl.input.Keyboard
 import org.lwjgl.opengl.GL11
 import stopbloatingme.uiframework.CustomPanel
+import stopbloatingme.uiframework.ExtendableCustomUIPanelPlugin
 import stopbloatingme.uiframework.Font
 import stopbloatingme.uiframework.TooltipMakerPanel
 import stopbloatingme.uiframework.anchorInCenterOfParent
@@ -58,6 +59,11 @@ object BrowserPanel {
     private const val ROW_H = 22f
     private const val COL_HEADER_H = 22f
     private const val FOOTER_H = 26f
+
+    /** Height of the hover preview strip under the list. Tall enough for a capital's sprite to be
+     *  recognisable without stealing more than a few rows from the list. */
+    private const val PREVIEW_H = 172f
+    private const val PREVIEW_SPRITE = 150f
     private const val CELL_PAD = 6f
     private const val CELL_TEXT_Y = 3f
 
@@ -74,6 +80,7 @@ object BrowserPanel {
     private var footerHost: CustomPanelAPI? = null
     private var headerHost: CustomPanelAPI? = null
     private var colHeaderHost: CustomPanelAPI? = null
+    private var previewHost: CustomPanelAPI? = null
     private var searchField: TextFieldAPI? = null
 
     private var listWidth = 0f
@@ -95,6 +102,12 @@ object BrowserPanel {
     private var renderedCategory: Category? = null
 
     private var leftDirty = false
+
+    /** The row the cursor was last over, and whether the preview still reflects it. Deliberately
+     *  sticky: it is NOT cleared when the cursor leaves a row, so the preview stays put while you
+     *  move the mouse toward it instead of flickering empty between rows. */
+    private var hoveredEntry: Entry? = null
+    private var previewedEntry: Entry? = null
 
     /** The filter column's scroller, its content height, and where the player had it scrolled to.
      *  The offset is preserved across rebuilds because *every* facet click rebuilds the column, and
@@ -127,7 +140,7 @@ object BrowserPanel {
         headerWidth = width - PAD * 2
         leftHeight = bodyH
         listWidth = rightW
-        listHeight = bodyH - COL_HEADER_H - FOOTER_H
+        listHeight = bodyH - COL_HEADER_H - PREVIEW_H - FOOTER_H
         visibleRows = max(1, floor(listHeight / ROW_H).toInt())
         columnWidths = FloatArray(COLUMN_WEIGHTS.size) { COLUMN_WEIGHTS[it] * rightW }
 
@@ -175,8 +188,10 @@ object BrowserPanel {
                         scrollBy(if (event.eventValue > 0) -3 else 3)
                     }
                 }.also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H) }
-                footerHost = CustomPanel(rightW, FOOTER_H) {}
+                previewHost = CustomPanel(rightW, PREVIEW_H) {}
                     .also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H + listHeight) }
+                footerHost = CustomPanel(rightW, FOOTER_H) {}
+                    .also { it.anchorInTopLeftOfParent(0f, COL_HEADER_H + listHeight + PREVIEW_H) }
             }
             rightHost.anchorInTopLeftOfParent(PAD + LEFT_W + GAP, PAD + HEADER_H)
         }
@@ -185,6 +200,7 @@ object BrowserPanel {
         buildHeader()
         buildColumnHeader()
         buildRowPool()
+        buildPreview()
         buildLeft()
         refilter(resetScroll = true)
         return panel
@@ -196,7 +212,10 @@ object BrowserPanel {
         footerHost = null
         headerHost = null
         colHeaderHost = null
+        previewHost = null
         searchField = null
+        hoveredEntry = null
+        previewedEntry = null
         rows.clear()
         filtered = emptyList()
         lastSignature = null
@@ -215,6 +234,8 @@ object BrowserPanel {
         // Switching tabs is a fresh set of facet groups; keeping the old offset would land you at an
         // arbitrary point in a different column.
         leftScrollOffset = 0f
+        // The hovered entry belongs to the tab we just left.
+        hoveredEntry = null
     }
 
     // --- Per-frame -----------------------------------------------------------------------------
@@ -250,9 +271,11 @@ object BrowserPanel {
             // A blacklist edit can drop rows out of an Allowed/Blocked view, but the player's place
             // in the list should survive it, so this path keeps the scroll position.
             refilter(resetScroll = false)
+            previewedEntry = null      // the preview states blocked/allowed; that just changed
         }
 
         if (firstRow != renderedFirstRow) bindRows()
+        if (hoveredEntry !== previewedEntry) buildPreview()
     }
 
     private fun refilter(resetScroll: Boolean) {
@@ -338,9 +361,11 @@ object BrowserPanel {
 
     private fun createRow(host: CustomPanelAPI, y: Float): RowView {
         var button: ButtonAPI? = null
+        var rowPlugin: ExtendableCustomUIPanelPlugin? = null
         val cells = ArrayList<Cell>()
 
-        val rowPanel = host.CustomPanel(listWidth, ROW_H) {
+        val rowPanel = host.CustomPanel(listWidth, ROW_H) { plugin ->
+            rowPlugin = plugin
             TooltipMakerPanel(listWidth, ROW_H) {
                 // Empty label: this checkbox is only the click target and the selected-state tint.
                 button = addAreaCheckbox(
@@ -373,6 +398,10 @@ object BrowserPanel {
             BlacklistStore.toggle(FilterState.category, entry.id)
             blacklistStamp++
         }
+        // Registered on the row panel rather than tracked from raw mouse coordinates, so it keeps
+        // working whatever the game's render resolution is. Rows are pooled, so this reads the
+        // currently-bound entry at hover time rather than capturing one.
+        rowPlugin?.onHoverEnter { view.entry?.let { hoveredEntry = it } }
         return view
     }
 
@@ -621,6 +650,66 @@ object BrowserPanel {
 
     private fun isResetArmed(): Boolean =
         resetArmedAt != 0L && System.currentTimeMillis() - resetArmedAt < RESET_ARM_WINDOW_MS
+
+    // --- Hover preview -------------------------------------------------------------------------
+
+    /**
+     * The strip under the list: the hovered entry's artwork on the left, its details on the right.
+     *
+     * This exists because names are not how anyone recognises a ship. With 3,294 hulls from 99 mods
+     * you know the silhouette, not the string, and blocking things you can't identify is how you end
+     * up deleting content you wanted.
+     *
+     * Rebuilt only when the hovered entry actually changes, so sweeping the cursor down the list
+     * costs one rebuild per row rather than one per frame.
+     */
+    private fun buildPreview() {
+        val host = previewHost ?: return
+        val entry = hoveredEntry
+        previewedEntry = entry
+        host.clearChildren()
+
+        if (entry == null) {
+            host.TooltipMakerPanel(listWidth, PREVIEW_H) {
+                addPara("Hover a row to preview it.", Misc.getGrayColor(), 8f)
+            }
+            return
+        }
+
+        val blocked = BlacklistStore.isBlacklisted(FilterState.category, entry.id)
+
+        if (entry.sprite.isNotBlank()) {
+            host.CustomPanel(PREVIEW_SPRITE, PREVIEW_SPRITE) {
+                TooltipMakerPanel(PREVIEW_SPRITE, PREVIEW_SPRITE) {
+                    // Fits within the box preserving aspect; a modded capital can be far larger than
+                    // this and a fighter far smaller.
+                    runCatching { addImage(entry.sprite, PREVIEW_SPRITE, PREVIEW_SPRITE, 0f) }
+                }
+            }.anchorInTopLeftOfParent(CELL_PAD, 6f)
+        }
+
+        val textX = if (entry.sprite.isNotBlank()) PREVIEW_SPRITE + CELL_PAD * 3 else CELL_PAD
+        val category = FilterState.category
+        host.CustomPanel(listWidth - textX - CELL_PAD, PREVIEW_H - 12f) {
+            TooltipMakerPanel(listWidth - textX - CELL_PAD, PREVIEW_H - 12f) {
+                addPara(entry.name, if (blocked) BLOCKED_COLOR else Misc.getHighlightColor(), 0f)
+                addPara(entry.id, Misc.getGrayColor(), 2f)
+                addPara(
+                    "${category.primaryLabel}: %s      ${category.secondaryLabel}: %s",
+                    6f, Misc.getBasePlayerColor(), entry.primary, entry.secondary,
+                )
+                category.designLabel?.let { label ->
+                    addPara("$label: %s", 2f, Misc.getBasePlayerColor(), entry.design)
+                }
+                addPara("Source mod: %s", 2f, Misc.getBasePlayerColor(), entry.sourceMod)
+                addPara(
+                    if (blocked) "BLOCKED - click the row to allow it again"
+                    else "Allowed - click the row to block it",
+                    if (blocked) BLOCKED_COLOR else Misc.getGrayColor(), 6f,
+                )
+            }
+        }.anchorInTopLeftOfParent(textX, 6f)
+    }
 
     // --- Footer --------------------------------------------------------------------------------
 

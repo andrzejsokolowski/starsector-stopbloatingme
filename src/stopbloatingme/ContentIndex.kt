@@ -21,6 +21,9 @@ class Entry(
     /** True for things that aren't really ownable products: stations, modules, fighter hulls,
      *  built-in/decorative weapons. Hidden unless the player asks to see them. */
     val hidden: Boolean,
+    /** Sprite path for the hover preview, or "" when the spec doesn't declare one. Resolved at index
+     *  time so hovering never has to go back to the spec. */
+    val sprite: String = "",
 ) {
     /** Lowercased haystack for the search box: name, id, every facet value, and the source mod. */
     val searchBlob: String =
@@ -91,6 +94,7 @@ object ContentIndex {
                 design = spec.manufacturer.clean(),
                 sourceMod = modName(runCatching { spec.sourceMod }.getOrNull()),
                 hidden = !isOwnableHull(spec),
+                sprite = spec.spriteName.orEmpty(),
             )
         }
         return out.sortedBy { it.name.lowercase() }
@@ -109,6 +113,8 @@ object ContentIndex {
                 design = spec.manufacturer.clean(),
                 sourceMod = modName(runCatching { spec.sourceMod }.getOrNull()),
                 hidden = spec.type in NON_PRODUCT_WEAPON_TYPES,
+                // Turret art is the recognisable view; hardpoint-only weapons fall back to theirs.
+                sprite = spec.turretSpriteName.orEmpty().ifBlank { spec.hardpointSpriteName.orEmpty() },
             )
         }
         return out.sortedBy { it.name.lowercase() }
@@ -127,6 +133,8 @@ object ContentIndex {
                 design = "",
                 sourceMod = modName(runCatching { spec.sourceMod }.getOrNull()),
                 hidden = false,
+                // A wing has no art of its own; its single fighter's hull carries the sprite.
+                sprite = runCatching { spec.variant?.hullSpec?.spriteName }.getOrNull().orEmpty(),
             )
         }
         return out.sortedBy { it.name.lowercase() }
