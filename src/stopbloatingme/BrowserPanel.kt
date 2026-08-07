@@ -434,7 +434,7 @@ object BrowserPanel {
                 4f,
             )
             addAreaCheckbox(
-                "Include stations, modules and (D) hulls", null,
+                "Include stations, modules and built-ins", null,
                 Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
                 innerW, 22f, 6f, true,
             ).apply {

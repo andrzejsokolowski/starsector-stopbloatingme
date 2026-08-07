@@ -18,7 +18,7 @@ class Entry(
     val secondary: String,
     val design: String,
     val sourceMod: String,
-    /** True for things that aren't really ownable products: stations, modules, (D) duplicates,
+    /** True for things that aren't really ownable products: stations, modules, fighter hulls,
      *  built-in/decorative weapons. Hidden unless the player asks to see them. */
     val hidden: Boolean,
 ) {
@@ -75,6 +75,14 @@ object ContentIndex {
         val out = ArrayList<Entry>(specs.size)
         for (spec in specs) {
             if (spec == null) continue
+            // Auto-generated (D) hulls never appear at all, not even behind the "show hidden" toggle.
+            // They aren't independently spawnable: DModManager.setDHull() takes an already-picked
+            // variant of the BASE hull and swaps in "<base>_D" afterwards, so blocking the base
+            // already stops the (D) version, and blocking "<base>_D" on its own could never do
+            // anything -- faction blueprint lists only ever hold the base id. Listing them would be
+            // offering a button that cannot work. Hand-authored damaged hulls (isDHull without
+            // isDefaultDHull) are real content and stay.
+            if (runCatching { spec.isDefaultDHull }.getOrDefault(false)) continue
             out += Entry(
                 id = spec.hullId,
                 name = spec.hullName.orEmpty().ifBlank { spec.hullId },
@@ -127,9 +135,10 @@ object ContentIndex {
     // --- Labels --------------------------------------------------------------------------------
 
     /**
-     * Hulls that aren't ownable vessels. Station hulls and loose module parts can't be bought or
-     * flown, and (D) duplicates are generated per-hull rather than authored, so listing them triples
-     * the ship list for no benefit. Fighter hulls belong to their wing, which is its own category.
+     * Hulls that aren't ownable vessels: station hulls and loose module parts, which can't be bought
+     * or flown, and fighter hulls, which belong to their wing over in the fighters tab. Shown only
+     * when the player asks for them. (Auto-generated (D) hulls are dropped from the index outright
+     * rather than merely hidden -- see [buildShips].)
      */
     private fun isOwnableHull(spec: ShipHullSpecAPI): Boolean {
         val hints = spec.hints ?: return true
@@ -137,7 +146,6 @@ object ContentIndex {
         if (hints.contains(ShipHullSpecAPI.ShipTypeHints.MODULE)) return false
         if (hints.contains(ShipHullSpecAPI.ShipTypeHints.UNDER_PARENT)) return false
         if (spec.hullSize == ShipAPI.HullSize.FIGHTER) return false
-        if (runCatching { spec.isDefaultDHull }.getOrDefault(false)) return false
         return true
     }
 

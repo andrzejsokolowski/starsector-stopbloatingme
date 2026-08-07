@@ -26,7 +26,7 @@ class CategoryFilter {
     var search = ""
     var visibility = Visibility.ALL
 
-    /** Stations, modules, (D) duplicates and built-in weapons are off by default; see [Entry.hidden]. */
+    /** Stations, modules and built-in weapons are off by default; see [Entry.hidden]. */
     var showHidden = false
 
     val selected: Map<FacetGroup, MutableSet<String>> =
