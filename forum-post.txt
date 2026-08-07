@@ -84,6 +84,9 @@ That's the entire point. Every facet is generated from your installed mods, and 
 They're deliberately not listed. Blocking a base hull already stops its (D) version, and blocking a (D) hull on its own could never do anything, so listing them would just be a button that doesn't work.
 [/spoiler]
 [spoiler=Version log]
+0.7.2
+Linked the mod to this forum thread and added the in-launcher update check URL.
+
 0.7.1
 Added Version Checker support and a direct download link.
 
