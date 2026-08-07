@@ -8,6 +8,7 @@ import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.campaign.listeners.ColonyInteractionListener
 import com.fs.starfarer.api.combat.ShipHullSpecAPI.ShipTypeHints
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
+import com.fs.starfarer.api.impl.campaign.ids.Tags
 import com.fs.starfarer.api.util.IntervalUtil
 
 /**
@@ -154,29 +155,52 @@ object Enforcer {
     // --- Codex ---------------------------------------------------------------------------------
 
     /**
-     * Stamps `HIDE_IN_CODEX` onto every blacklisted hull. Called from
-     * `onAboutToStartGeneratingCodex`, which fires at the top of codex generation during
-     * application load -- the one sanctioned moment to do this, before any category is built, so
-     * hidden entries can never dangle as broken "related" links.
+     * Stamps codex-hiding onto every blacklisted spec: the `HIDE_IN_CODEX` *hint* for ship hulls,
+     * and the equivalent `Tags.HIDE_IN_CODEX` *tag* for weapons and fighter wings -- which is the
+     * check `CodexDataV2.populateWeapons()`/`populateFighters()` make, and a tag vanilla content
+     * already uses on its own weapons.
      *
-     * The codex is generated once per process, so un-blocking a ship shows it again on the next
-     * game restart, not immediately. Auto-generated (D) hulls of a blocked base are hidden too.
+     * Crash-safe by construction: this is called from `onAboutToStartGeneratingCodex`, which fires
+     * at the top of codex generation during application load, before any category is built -- so a
+     * hidden entry is simply never created. Every cross-link the generator makes afterwards goes
+     * through `getEntry()` + a null check (or the null-checked `addRelatedEntry`), so a visible
+     * ship whose variant mounts a hidden weapon just loses that one "related entry" chip.
+     *
+     * The codex is generated once per process, so un-blocking shows things again on the next game
+     * restart, not immediately. Auto-generated (D) hulls of a blocked base are hidden too.
      */
     @JvmStatic
     fun applyCodexHiding() {
         val ships = BlacklistStore.ids(Category.SHIPS)
-        if (ships.isEmpty()) return
+        val weapons = BlacklistStore.ids(Category.WEAPONS)
+        val fighters = BlacklistStore.ids(Category.FIGHTERS)
+        if (ships.isEmpty() && weapons.isEmpty() && fighters.isEmpty()) return
+
         var hidden = 0
-        for (spec in Global.getSettings().allShipHullSpecs) {
-            if (spec == null) continue
-            val blocked = ships.contains(spec.hullId) ||
-                (runCatching { spec.isDefaultDHull }.getOrDefault(false) &&
-                    ships.contains(runCatching { spec.baseHullId }.getOrNull()))
-            if (blocked && runCatching { spec.hints?.add(ShipTypeHints.HIDE_IN_CODEX) }.getOrNull() == true) {
-                hidden++
+        if (ships.isNotEmpty()) {
+            for (spec in Global.getSettings().allShipHullSpecs) {
+                if (spec == null) continue
+                val blocked = ships.contains(spec.hullId) ||
+                    (runCatching { spec.isDefaultDHull }.getOrDefault(false) &&
+                        ships.contains(runCatching { spec.baseHullId }.getOrNull()))
+                if (blocked && runCatching { spec.hints?.add(ShipTypeHints.HIDE_IN_CODEX) }.getOrNull() == true) {
+                    hidden++
+                }
             }
         }
-        if (hidden > 0) log.info("StopBloatingMe: hid $hidden hull(s) from the codex.")
+        if (weapons.isNotEmpty()) {
+            for (spec in Global.getSettings().allWeaponSpecs) {
+                if (spec == null || !weapons.contains(spec.weaponId)) continue
+                if (runCatching { spec.addTag(Tags.HIDE_IN_CODEX) }.isSuccess) hidden++
+            }
+        }
+        if (fighters.isNotEmpty()) {
+            for (spec in Global.getSettings().allFighterWingSpecs) {
+                if (spec == null || !fighters.contains(spec.id)) continue
+                if (runCatching { spec.addTag(Tags.HIDE_IN_CODEX) }.isSuccess) hidden++
+            }
+        }
+        if (hidden > 0) log.info("StopBloatingMe: hid $hidden blacklisted entries from the codex.")
     }
 }
 
