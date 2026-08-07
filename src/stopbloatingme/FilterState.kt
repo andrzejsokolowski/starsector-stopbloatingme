@@ -156,8 +156,9 @@ object FilterState {
             if (value.isBlank()) continue
             counts[value] = (counts[value] ?: 0) + 1
         }
+        val order = scaleOrder(category, group)
         return counts.entries
-            .sortedWith(compareBy({ naturalRank(it.key) }, { -it.value }, { it.key.lowercase() }))
+            .sortedWith(compareBy({ order[it.key] ?: Int.MAX_VALUE }, { it.key.lowercase() }))
             .map { it.key to it.value }
     }
 
@@ -168,11 +169,25 @@ object FilterState {
         FacetGroup.MOD -> sourceMod
     }
 
-    /** Hull sizes and mount sizes read wrong alphabetically; pin them to their real progression. */
-    private val NATURAL_ORDER = listOf(
-        "Frigate", "Destroyer", "Cruiser", "Capital",
-        "Small", "Medium", "Large",
-    ).withIndex().associate { (index, value) -> value to index }
+    private val HULL_SIZE_ORDER = rank("Frigate", "Destroyer", "Cruiser", "Capital", "Fighter")
+    private val MOUNT_SIZE_ORDER = rank("Small", "Medium", "Large")
 
-    private fun naturalRank(value: String): Int = NATURAL_ORDER[value] ?: Int.MAX_VALUE
+    private fun rank(vararg values: String): Map<String, Int> =
+        values.withIndex().associate { (index, value) -> value to index }
+
+    /**
+     * Facet values are alphabetical, which is the only order you can actually search by eye once a
+     * group runs to 99 source mods or a hundred design types.
+     *
+     * The two exceptions are genuine scales, where alphabetical would be actively worse: hull size
+     * reads Frigate-to-Capital, not Capital-to-Frigate, and mount size reads Small-to-Large. These
+     * are matched per category *and* group rather than by value, so the ship Designation group -- a
+     * free-text field that happens to contain the words "Frigate" and "Cruiser" among many others --
+     * stays purely alphabetical instead of hoisting four arbitrary entries to the top.
+     */
+    private fun scaleOrder(category: Category, group: FacetGroup): Map<String, Int> = when {
+        category == Category.SHIPS && group == FacetGroup.PRIMARY -> HULL_SIZE_ORDER
+        category == Category.WEAPONS && group == FacetGroup.SECONDARY -> MOUNT_SIZE_ORDER
+        else -> emptyMap()
+    }
 }
