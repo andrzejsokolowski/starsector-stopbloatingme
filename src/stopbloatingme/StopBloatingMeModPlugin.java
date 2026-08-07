@@ -20,4 +20,19 @@ public class StopBloatingMeModPlugin extends BaseModPlugin {
         Global.getLogger(StopBloatingMeModPlugin.class)
                 .info("StopBloatingMe: application loaded.");
     }
+
+    /**
+     * Blueprints from .faction files are re-added by the engine on every load, so enforcement has
+     * to re-run here every time -- see {@link Enforcer}. Also installs the transient daily re-strip
+     * script and the market-open cargo sweep; transient means nothing is ever written to the save.
+     */
+    @Override
+    public void onGameLoad(boolean newGame) {
+        Enforcer.onGameLoad();
+    }
+
+    @Override
+    public void onAboutToStartGeneratingCodex() {
+        Enforcer.applyCodexHiding();
+    }
 }
