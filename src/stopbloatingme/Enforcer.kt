@@ -15,22 +15,25 @@ import com.fs.starfarer.api.util.IntervalUtil
  * The half of the mod that actually changes the game: takes what [BlacklistStore] says and removes
  * it from play.
  *
- * Three layers, because no single lever covers everything:
+ * Four layers, because no single lever covers everything:
  *
- * 1. **Faction known-lists** ([stripFactions]) -- the primary lever. Fleet composition and vanilla
- *    market stock are both driven by each faction's known ships/weapons/fighters, so removing an id
- *    there stops it spawning at the source. Per the `FactionAPI.removeKnownShip` javadoc, the
- *    `.faction`-file blueprints are re-added on **every game load**, so this must re-run from
- *    `onGameLoad` each time -- which is exactly why the store keeps plain ids forever.
+ * 1. **Faction known-lists** ([stripFactions]) -- the primary lever for spawning. Fleet composition
+ *    and vanilla market stock are both driven by each faction's known ships/weapons/fighters, so
+ *    removing an id there stops it spawning at the source. Per the `FactionAPI.removeKnownShip`
+ *    javadoc, the `.faction`-file blueprints are re-added on **every game load**, so this must
+ *    re-run from `onGameLoad` each time -- which is exactly why the store keeps plain ids forever.
  * 2. **A periodic re-strip** ([EnforcerScript]) -- factions learn new blueprints mid-game (raids,
  *    story events, Nexerelin diplomacy), so once a day we quietly strip again.
  * 3. **A market-open cargo sweep** ([MarketSweepListener]) -- the safety net for stock that was
  *    generated before a strip landed, and for mod submarkets that fill their cargo without
  *    consulting known-lists at all.
+ * 4. **Loot blocking** ([LootBlocker]) -- drops come from a separate pipeline that never looks at
+ *    faction lists, so commodities, special items, weapons and fighters are kept out of it by
+ *    zeroing drop-table weights and stamping the `no_drop` tags vanilla already honours.
  *
- * Ships are stripped everywhere (fleets and markets); weapons and fighters only stop being *stocked*
- * -- their specs stay loaded and predefined `.variant` loadouts keep working, which is what keeps
- * this crash-free.
+ * Ships are stripped everywhere (fleets, markets and loot); weapons and fighters stop being stocked
+ * and stop dropping, but their specs stay loaded and predefined `.variant` loadouts keep working,
+ * which is what keeps this crash-free.
  */
 object Enforcer {
 
@@ -41,10 +44,15 @@ object Enforcer {
     fun onGameLoad() {
         val sector = Global.getSector() ?: return
         stripFactions(reason = "game load")
+        // Specs outlive the campaign, so this has to re-derive from scratch every load: the player
+        // can change the blacklist at the main menu between two saves in the same session.
+        runCatching { LootBlocker.apply() }
+            .onFailure { log.error("StopBloatingMe: loot blocking failed; drops are unfiltered.", it) }
         // Transient on purpose: nothing of ours is ever written into the save, so removing the mod
-        // can never corrupt one. The plugin re-adds both on every load.
+        // can never corrupt one. The plugin re-adds all three on every load.
         sector.addTransientScript(EnforcerScript())
         sector.listenerManager.addListener(MarketSweepListener(), true)
+        sector.listenerManager.addListener(LootSweepListener(), true)
     }
 
     /**
@@ -114,41 +122,15 @@ object Enforcer {
      * never touched. Everything else is a shop, and a shop's stock is fair game.
      */
     fun sweepMarket(market: MarketAPI) {
-        val ships = BlacklistStore.ids(Category.SHIPS)
-        val weapons = BlacklistStore.ids(Category.WEAPONS)
-        val fighters = BlacklistStore.ids(Category.FIGHTERS)
-        if (ships.isEmpty() && weapons.isEmpty() && fighters.isEmpty()) return
-
         for (submarket in market.submarketsCopy) {
             if (submarket == null) continue
             if (submarket.specId == Submarkets.SUBMARKET_STORAGE) continue
             if (submarket.specId == Submarkets.LOCAL_RESOURCES) continue
             if (runCatching { submarket.plugin?.isFreeTransfer == true }.getOrDefault(false)) continue
             val cargo = runCatching { submarket.cargoNullOk }.getOrNull() ?: continue
-
-            if (weapons.isNotEmpty()) {
-                for (stack in cargo.weapons.toList()) {
-                    val id = stack?.item ?: continue
-                    if (weapons.contains(id)) cargo.removeWeapons(id, stack.count)
-                }
-            }
-            if (fighters.isNotEmpty()) {
-                for (stack in cargo.fighters.toList()) {
-                    val id = stack?.item ?: continue
-                    if (fighters.contains(id)) cargo.removeFighters(id, stack.count)
-                }
-            }
-            if (ships.isNotEmpty()) {
-                val mothballed = runCatching { cargo.mothballedShips }.getOrNull() ?: continue
-                for (member in mothballed.membersListCopy) {
-                    if (member == null) continue
-                    // baseHullId catches ships listed as their auto-generated (D) version, whose
-                    // own id is never in the store because the browser doesn't list them.
-                    val blocked = ships.contains(member.hullId) ||
-                        ships.contains(runCatching { member.hullSpec?.baseHullId }.getOrNull())
-                    if (blocked) mothballed.removeFleetMember(member)
-                }
-            }
+            // Ships (including hulls listed as their auto-generated (D) version), weapons, fighter
+            // chips and special items; commodity stock is the economy's business, not ours.
+            runCatching { LootBlocker.sweep(cargo, includeCommodities = false) }
         }
     }
 
@@ -168,6 +150,12 @@ object Enforcer {
      *
      * The codex is generated once per process, so un-blocking shows things again on the next game
      * restart, not immediately. Auto-generated (D) hulls of a blocked base are hidden too.
+     *
+     * Commodities and special items are deliberately **not** hidden. There are a few dozen of each,
+     * so they are not what makes a codex unreadable, and hiding them would be self-defeating: the
+     * browser reads `HIDE_IN_CODEX` off those two spec types to decide which entries are engine
+     * plumbing rather than cargo (see [ContentIndex]), so stamping the tag on a blocked commodity
+     * would quietly drop it out of the very list you'd use to unblock it.
      */
     @JvmStatic
     fun applyCodexHiding() {

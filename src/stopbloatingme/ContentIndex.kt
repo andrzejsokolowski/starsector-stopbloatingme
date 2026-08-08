@@ -2,9 +2,12 @@ package stopbloatingme
 
 import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.ModSpecAPI
+import com.fs.starfarer.api.campaign.SpecialItemSpecAPI
+import com.fs.starfarer.api.campaign.econ.CommoditySpecAPI
 import com.fs.starfarer.api.combat.ShipAPI
 import com.fs.starfarer.api.combat.ShipHullSpecAPI
 import com.fs.starfarer.api.combat.WeaponAPI
+import com.fs.starfarer.api.impl.campaign.ids.Tags
 import com.fs.starfarer.api.loading.WingRole
 
 /**
@@ -19,7 +22,8 @@ class Entry(
     val design: String,
     val sourceMod: String,
     /** True for things that aren't really ownable products: stations, modules, fighter hulls,
-     *  built-in/decorative weapons. Hidden unless the player asks to see them. */
+     *  built-in/decorative weapons, and the accounting-only commodities the economy uses to talk to
+     *  itself. Hidden unless the player asks to see them. */
     val hidden: Boolean,
     /** Sprite path for the hover preview, or "" when the spec doesn't declare one. Resolved at index
      *  time so hovering never has to go back to the spec. */
@@ -31,15 +35,17 @@ class Entry(
 }
 
 /**
- * The catalogue of every ship hull, weapon and fighter wing the current mod list defines.
+ * The catalogue of every ship hull, weapon, fighter wing, commodity and special item the current mod
+ * list defines.
  *
- * Built once and cached for the rest of the process. The spike measured a full scan of all three
- * categories at **5 ms** on a 244-mod install (8,644 hulls / 1,801 weapons / 667 wings), so there is
- * no loading state and no background thread here -- it is cheaper to just build it than to manage
- * the machinery for not building it.
+ * Built once and cached for the rest of the process. The spike measured a full scan of the three
+ * big categories at **5 ms** on a 244-mod install (8,644 hulls / 1,801 weapons / 667 wings), and
+ * commodities and special items are two orders of magnitude smaller, so there is no loading state
+ * and no background thread here -- it is cheaper to just build it than to manage the machinery for
+ * not building it.
  *
- * Source mod comes straight off the spec: hulls, weapons and wings all implement
- * `WithSourceMod`, so attribution needs no CSV parsing. Specs with no source mod are vanilla.
+ * Source mod comes straight off the spec: all five spec types implement `WithSourceMod`, so
+ * attribution needs no CSV parsing. Specs with no source mod are vanilla.
  */
 object ContentIndex {
 
@@ -62,6 +68,8 @@ object ContentIndex {
             Category.SHIPS to buildShips(),
             Category.WEAPONS to buildWeapons(),
             Category.FIGHTERS to buildFighters(),
+            Category.COMMODITIES to buildCommodities(),
+            Category.ITEMS to buildItems(),
         )
         cache = built
         Global.getLogger(ContentIndex::class.java).info(
@@ -140,7 +148,89 @@ object ContentIndex {
         return out.sortedBy { it.name.lowercase() }
     }
 
+    private fun buildCommodities(): List<Entry> {
+        val specs = Global.getSettings().allCommoditySpecs
+        val out = ArrayList<Entry>(specs.size)
+        for (spec in specs) {
+            if (spec == null) continue
+            out += Entry(
+                id = spec.id,
+                name = spec.name.orEmpty().ifBlank { spec.id },
+                primary = commodityClass(spec),
+                secondary = spec.demandClass.clean(),
+                design = "",
+                sourceMod = modName(runCatching { spec.sourceMod }.getOrNull()),
+                // Meta commodities (`ships`, `blueprints`, `credits`) are accounting rows for the
+                // economy, not cargo anyone can hold, and the ones vanilla already keeps out of the
+                // codex (`ai_cores`, `survey_data`) are demand-class placeholders in the same vein.
+                // Reading the tag is safe here because, unlike ships and weapons, we never *add*
+                // HIDE_IN_CODEX to a commodity -- see Enforcer.applyCodexHiding.
+                hidden = runCatching { spec.isMeta }.getOrDefault(false) ||
+                    runCatching { spec.hasTag(Tags.HIDE_IN_CODEX) }.getOrDefault(false),
+                sprite = spec.iconName.orEmpty(),
+            )
+        }
+        return out.sortedBy { it.name.lowercase() }
+    }
+
+    private fun buildItems(): List<Entry> {
+        val specs = Global.getSettings().allSpecialItemSpecs
+        val out = ArrayList<Entry>(specs.size)
+        for (spec in specs) {
+            if (spec == null) continue
+            // Mission items (janus device, planetkiller, wormhole scanner) never come out of a loot
+            // roll -- scripted missions hand them over directly. Listing them would offer a button
+            // whose only possible effect is breaking the quest that needs the item, so they are
+            // dropped from the index outright rather than merely hidden. Same call as the
+            // auto-generated (D) hulls over in buildShips.
+            if (runCatching { spec.hasTag(Tags.MISSION_ITEM) }.getOrDefault(false)) continue
+            out += Entry(
+                id = spec.id,
+                name = spec.name.orEmpty().ifBlank { spec.id },
+                primary = itemType(spec),
+                secondary = spec.manufacturer.clean(),
+                design = "",
+                sourceMod = modName(runCatching { spec.sourceMod }.getOrNull()),
+                hidden = runCatching { spec.hasTag(Tags.HIDE_IN_CODEX) }.getOrDefault(false),
+                sprite = spec.iconName.orEmpty(),
+            )
+        }
+        return out.sortedBy { it.name.lowercase() }
+    }
+
     // --- Labels --------------------------------------------------------------------------------
+
+    /**
+     * Which shelf a commodity sits on. Checked most-specific-first: a meta commodity is also
+     * non-economic, and `lobster` is both exotic and a luxury good.
+     */
+    private fun commodityClass(spec: CommoditySpecAPI): String = when {
+        runCatching { spec.isMeta }.getOrDefault(false) -> "Meta"
+        runCatching { spec.isExotic }.getOrDefault(false) -> "Exotic"
+        runCatching { spec.isNonEcon }.getOrDefault(false) -> "Non-economic"
+        runCatching { spec.isPrimary }.getOrDefault(false) -> "Primary"
+        else -> "Standard"
+    }
+
+    /**
+     * Special items have no type field, only tags, so the type is read off the tags vanilla and mods
+     * already use. `single_bp` covers the three generic blueprint items (`ship_bp`, `weapon_bp`,
+     * `fighter_bp`) -- blocking one of those stops *every* blueprint of that kind dropping, which is
+     * a much bigger hammer than blocking one hull, so it is worth naming clearly.
+     */
+    private fun itemType(spec: SpecialItemSpecAPI): String {
+        fun has(tag: String) = runCatching { spec.hasTag(tag) }.getOrDefault(false)
+        return when {
+            has("colony_item") -> "Colony item"
+            has("package_bp") -> "Blueprint package"
+            has("single_bp") -> "Blueprint (any)"
+            has("modspec") -> "Hullmod spec"
+            has("ai_core") -> "AI core"
+            has("threat") || has("monster") -> "Alien tech"
+            else -> UNSPECIFIED
+        }
+    }
+
 
     /**
      * Hulls that aren't ownable vessels: station hulls and loose module parts, which can't be bought

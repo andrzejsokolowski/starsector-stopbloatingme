@@ -5,8 +5,8 @@
     "modVersion":
     {
         "major":0,
-        "minor":7,
-        "patch":"2"
+        "minor":8,
+        "patch":"0"
     },
     "starsectorVersion":"0.98a-RC8",
     "directDownloadURL":"https://github.com/andrzejsokolowski/starsector-stopbloatingme/releases/latest/download/StopBloatingMe.zip"

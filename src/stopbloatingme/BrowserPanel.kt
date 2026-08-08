@@ -59,6 +59,9 @@ object BrowserPanel {
     private const val ROW_H = 22f
     private const val COL_HEADER_H = 22f
     private const val FOOTER_H = 26f
+    private const val TAB_W_MAX = 250f
+    private const val TAB_GAP = 8f
+    private const val CLOSE_W = 110f
 
     /** Height of the hover preview strip under the list. Tall enough for a capital's sprite to be
      *  recognisable without stealing more than a few rows from the list. */
@@ -420,13 +423,19 @@ object BrowserPanel {
         val host = headerHost ?: return
         host.clearChildren()
 
+        // Tabs share whatever the CLOSE button leaves, capped at the width one comfortably wants.
+        // Fixed-width tabs used to fit when there were three of them; five would run under CLOSE on
+        // anything narrower than about 1500px.
+        val tabCount = Category.entries.size
+        val available = headerWidth - CLOSE_W - GAP - (tabCount - 1) * TAB_GAP
+        val tabWidth = min(TAB_W_MAX, available / tabCount)
+
         var x = 0f
         for (category in Category.entries) {
             val count = ContentIndex.entries(category).count { !it.hidden }
             val blocked = BlacklistStore.count(category)
             val label = if (blocked > 0) "${category.label}  ($count, $blocked blocked)"
             else "${category.label}  ($count)"
-            val tabWidth = 250f
             host.tab(x, 0f, tabWidth, HEADER_H - 6f, label, category == FilterState.category) {
                 if (FilterState.category != category) {
                     FilterState.category = category
@@ -434,10 +443,12 @@ object BrowserPanel {
                     leftDirty = true
                 }
             }
-            x += tabWidth + 8f
+            x += tabWidth + TAB_GAP
         }
 
-        host.smallButton(headerWidth - 110f, 0f, 110f, HEADER_H - 6f, "CLOSE") { MenuButton.close() }
+        host.smallButton(headerWidth - CLOSE_W, 0f, CLOSE_W, HEADER_H - 6f, "CLOSE") {
+            MenuButton.close()
+        }
     }
 
     /** Column titles, positioned with the same widths as the row cells so they stay in step. */
@@ -493,7 +504,7 @@ object BrowserPanel {
                 4f,
             )
             addAreaCheckbox(
-                "Include stations, modules and built-ins", null,
+                category.hiddenLabel, null,
                 Misc.getBasePlayerColor(), Misc.getDarkPlayerColor(), Misc.getBrightPlayerColor(),
                 innerW, 22f, 6f, true,
             ).apply {
