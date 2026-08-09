@@ -6,9 +6,9 @@ import com.fs.starfarer.api.campaign.FactionAPI
 import com.fs.starfarer.api.campaign.PlayerMarketTransaction
 import com.fs.starfarer.api.campaign.econ.MarketAPI
 import com.fs.starfarer.api.campaign.listeners.ColonyInteractionListener
-import com.fs.starfarer.api.combat.ShipHullSpecAPI.ShipTypeHints
 import com.fs.starfarer.api.impl.campaign.ids.Submarkets
-import com.fs.starfarer.api.impl.campaign.ids.Tags
+import com.fs.starfarer.api.impl.codex.CodexDataV2
+import com.fs.starfarer.api.impl.codex.CodexEntryPlugin
 import com.fs.starfarer.api.util.IntervalUtil
 
 /**
@@ -137,58 +137,97 @@ object Enforcer {
     // --- Codex ---------------------------------------------------------------------------------
 
     /**
-     * Stamps codex-hiding onto every blacklisted spec: the `HIDE_IN_CODEX` *hint* for ship hulls,
-     * and the equivalent `Tags.HIDE_IN_CODEX` *tag* for weapons and fighter wings -- which is the
-     * check `CodexDataV2.populateWeapons()`/`populateFighters()` make, and a tag vanilla content
-     * already uses on its own weapons.
+     * Removes every blacklisted thing's codex entry, **after** the whole codex has been built and
+     * linked.
      *
-     * Crash-safe by construction: this is called from `onAboutToStartGeneratingCodex`, which fires
-     * at the top of codex generation during application load, before any category is built -- so a
-     * hidden entry is simply never created. Every cross-link the generator makes afterwards goes
-     * through `getEntry()` + a null check (or the null-checked `addRelatedEntry`), so a visible
-     * ship whose variant mounts a hidden weapon just loses that one "related entry" chip.
+     * This used to work the other way round: stamp `HIDE_IN_CODEX` from `onAboutToStartGeneratingCodex`
+     * so `populateWeapons()` and friends never created the entry in the first place. That was
+     * cheaper, and it was safe against *vanilla*, whose cross-links all go through `getEntry()` plus
+     * a null check. It was not safe against other mods. `CodexDataV2.init()` runs
+     * `onAboutToLinkCodexEntries()` on every enabled mod plugin between populating and linking, and
+     * a mod that links its own content to a vanilla entry has no reason to expect that entry to be
+     * missing -- JaydeePiracy dereferences the result directly and took the title screen down with
+     * an NPE the moment anything was blacklisted.
      *
+     * So we let every entry be created and linked exactly as if the mod weren't installed, and prune
+     * afterwards from `onCodexDataGenerated`, the last hook in `init()`. Three steps, because a
+     * detached entry that something still points at would show up as a related-entry chip leading
+     * nowhere: unhook each doomed entry from its parent, strip it out of every surviving entry's
+     * related set, then rebuild the id map so `getEntry()` agrees with the tree.
+     *
+     * Nothing has rendered at this point -- `init()` is still on the stack -- so this is invisible.
      * The codex is generated once per process, so un-blocking shows things again on the next game
-     * restart, not immediately. Auto-generated (D) hulls of a blocked base are hidden too.
-     *
-     * Commodities and special items are deliberately **not** hidden. There are a few dozen of each,
-     * so they are not what makes a codex unreadable, and hiding them would be self-defeating: the
-     * browser reads `HIDE_IN_CODEX` off those two spec types to decide which entries are engine
-     * plumbing rather than cargo (see [ContentIndex]), so stamping the tag on a blocked commodity
-     * would quietly drop it out of the very list you'd use to unblock it.
+     * restart, not immediately. Auto-generated (D) hulls of a blocked base go too.
      */
     @JvmStatic
-    fun applyCodexHiding() {
-        val ships = BlacklistStore.ids(Category.SHIPS)
-        val weapons = BlacklistStore.ids(Category.WEAPONS)
-        val fighters = BlacklistStore.ids(Category.FIGHTERS)
-        if (ships.isEmpty() && weapons.isEmpty() && fighters.isEmpty()) return
+    fun pruneCodex() {
+        val doomed = doomedEntryIds()
+        if (doomed.isEmpty()) return
+        val root = runCatching { CodexDataV2.ROOT }.getOrNull() ?: return
 
-        var hidden = 0
+        val removed = HashSet<CodexEntryPlugin>()
+        runCatching { detach(root, doomed, removed) }
+            .onFailure { log.error("StopBloatingMe: could not prune the codex; leaving it intact.", it) }
+        if (removed.isEmpty()) return
+
+        runCatching { unlink(root, removed) }
+        runCatching { CodexDataV2.rebuildIdToEntryMap() }
+        log.info("StopBloatingMe: pruned ${removed.size} blacklisted entries from the codex.")
+    }
+
+    /** Codex entry ids for everything on the blacklist, in the `codex_<kind>_<id>` form the codex uses. */
+    private fun doomedEntryIds(): Set<String> {
+        val out = HashSet<String>()
+        val ships = BlacklistStore.ids(Category.SHIPS)
         if (ships.isNotEmpty()) {
             for (spec in Global.getSettings().allShipHullSpecs) {
                 if (spec == null) continue
+                // The browser never lists auto-generated (D) hulls, so they are matched off the base
+                // hull the same way the market sweep and the loot blocker do.
                 val blocked = ships.contains(spec.hullId) ||
                     (runCatching { spec.isDefaultDHull }.getOrDefault(false) &&
                         ships.contains(runCatching { spec.baseHullId }.getOrNull()))
-                if (blocked && runCatching { spec.hints?.add(ShipTypeHints.HIDE_IN_CODEX) }.getOrNull() == true) {
-                    hidden++
+                if (blocked) out += CodexDataV2.getShipEntryId(spec.hullId)
+            }
+        }
+        BlacklistStore.ids(Category.WEAPONS).forEach { out += CodexDataV2.getWeaponEntryId(it) }
+        BlacklistStore.ids(Category.FIGHTERS).forEach { out += CodexDataV2.getFighterEntryId(it) }
+        BlacklistStore.ids(Category.COMMODITIES).forEach { out += CodexDataV2.getCommodityEntryId(it) }
+        BlacklistStore.ids(Category.ITEMS).forEach { out += CodexDataV2.getItemEntryId(it) }
+        return out
+    }
+
+    /** Unhooks doomed entries from the tree, collecting them into [removed]. */
+    private fun detach(node: CodexEntryPlugin, doomed: Set<String>, removed: MutableSet<CodexEntryPlugin>) {
+        val children = node.children ?: return
+        // Over a copy: we mutate the live list as we go.
+        for (child in children.toList()) {
+            if (child == null) continue
+            if (doomed.contains(child.id)) {
+                children.remove(child)
+                removed += child
+            } else {
+                detach(child, doomed, removed)
+            }
+        }
+    }
+
+    /** Strips every reference to a removed entry out of what's left, so no chip points at a ghost. */
+    private fun unlink(node: CodexEntryPlugin, removed: Set<CodexEntryPlugin>) {
+        val goneIds = removed.mapNotNull { runCatching { it.id }.getOrNull() }.toSet()
+        // getChildrenRecursive includes the node it's called on, so this is the whole surviving tree.
+        for (entry in runCatching { node.getChildrenRecursive(true) }.getOrNull().orEmpty()) {
+            if (entry == null) continue
+            for (related in runCatching { entry.relatedEntries?.toList() }.getOrNull().orEmpty()) {
+                if (related != null && removed.contains(related)) {
+                    runCatching { entry.removeRelatedEntry(related) }
                 }
             }
-        }
-        if (weapons.isNotEmpty()) {
-            for (spec in Global.getSettings().allWeaponSpecs) {
-                if (spec == null || !weapons.contains(spec.weaponId)) continue
-                if (runCatching { spec.addTag(Tags.HIDE_IN_CODEX) }.isSuccess) hidden++
+            // The unresolved id set too: it is what a later re-link would read from.
+            for (id in runCatching { entry.relatedEntryIds?.toList() }.getOrNull().orEmpty()) {
+                if (id != null && goneIds.contains(id)) runCatching { entry.removeRelatedEntry(id) }
             }
         }
-        if (fighters.isNotEmpty()) {
-            for (spec in Global.getSettings().allFighterWingSpecs) {
-                if (spec == null || !fighters.contains(spec.id)) continue
-                if (runCatching { spec.addTag(Tags.HIDE_IN_CODEX) }.isSuccess) hidden++
-            }
-        }
-        if (hidden > 0) log.info("StopBloatingMe: hid $hidden blacklisted entries from the codex.")
     }
 }
 

@@ -31,8 +31,14 @@ public class StopBloatingMeModPlugin extends BaseModPlugin {
         Enforcer.onGameLoad();
     }
 
+    /**
+     * Blacklisted entries are pruned from the codex <em>after</em> it is fully built and linked, not
+     * suppressed before it is generated -- see {@link Enforcer#pruneCodex()}. This is the last hook
+     * {@code CodexDataV2.init()} calls, which means every other mod's
+     * {@code onAboutToLinkCodexEntries()} has already run against a complete, vanilla-shaped codex.
+     */
     @Override
-    public void onAboutToStartGeneratingCodex() {
-        Enforcer.applyCodexHiding();
+    public void onCodexDataGenerated() {
+        Enforcer.pruneCodex();
     }
 }
