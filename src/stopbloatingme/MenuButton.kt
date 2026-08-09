@@ -91,5 +91,9 @@ object MenuButton {
         openPanel = null
         runCatching { host?.removeComponent(panel) }
         BrowserPanel.dispose()
+        // The browser is the only place the blacklist changes, and the codex reads visibility off
+        // the live spec tags -- so re-deriving here is what makes an edit show up in the codex
+        // straight away, rather than only after the next game load.
+        runCatching { LootBlocker.apply() }
     }
 }

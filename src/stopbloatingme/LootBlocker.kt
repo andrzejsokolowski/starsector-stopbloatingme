@@ -117,6 +117,17 @@ object LootBlocker {
      * Stamps `no_drop` (and `no_bp_drop`) onto every blacklisted spec, and zeroes the rarity weight
      * of blacklisted weapons and fighter wings.
      *
+     * `invisible_in_codex` rides along, and is the entirety of this mod's codex hiding. Every codex
+     * entry type we care about -- hulls, weapons, wings, special items, commodities -- overrides
+     * `getUnlockRelatedTags()` to return its spec's live tag set, and `CodexEntryV2.isVisible()`
+     * returns false the moment that set contains the tag. So the entry is built and linked exactly
+     * as if this mod weren't installed and simply doesn't render: `getEntry()` still resolves for
+     * any mod that links to it, and related-entry lists already filter on `isVisible()`. An earlier
+     * version removed entries from the codex tree instead, which crashed JaydeePiracy when it linked
+     * its own content to a vanilla entry that was no longer there. Nothing in vanilla removes a
+     * codex entry, and neither should we -- the tag is the supported way to say "don't show this",
+     * and it costs nothing to reverse.
+     *
      * The hull pass is what stops a blocked *ship* still turning up as a blueprint: the
      * `item_ship_bp:{tags:[rare_bp, !no_drop, !restricted]}` row in `drop_groups.csv` resolves
      * through `ShipBlueprintItemPlugin.pickShip()`, which filters **hull** specs by those tags, and
@@ -140,13 +151,13 @@ object LootBlocker {
                     (runCatching { spec.isDefaultDHull }.getOrDefault(false) &&
                         ships.contains(runCatching { spec.baseHullId }.getOrNull()))
                 if (!blocked) continue
-                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.NO_BP_DROP)
+                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.NO_BP_DROP, Tags.INVISIBLE_IN_CODEX)
             }
         }
         if (weapons.isNotEmpty()) {
             for (spec in settings.allWeaponSpecs) {
                 if (spec == null || !weapons.contains(spec.weaponId)) continue
-                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.NO_BP_DROP)
+                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.NO_BP_DROP, Tags.INVISIBLE_IN_CODEX)
                 val was = runCatching { spec.rarity }.getOrDefault(0f)
                 if (was > 0f && runCatching { spec.rarity = 0f }.isSuccess) {
                     undo += { spec.rarity = was }
@@ -158,7 +169,7 @@ object LootBlocker {
                 if (spec == null || !fighters.contains(spec.id)) continue
                 // WING_NO_DROP is the strongest of the three: DropGroupRow filters on it both when
                 // building a group's picker and when resolving a rolled `ftr_` row.
-                tag(tagsOf { spec.tags }, Tags.WING_NO_DROP, Tags.NO_DROP, Tags.NO_BP_DROP)
+                tag(tagsOf { spec.tags }, Tags.WING_NO_DROP, Tags.NO_DROP, Tags.NO_BP_DROP, Tags.INVISIBLE_IN_CODEX)
                 val was = runCatching { spec.rarity }.getOrDefault(0f)
                 if (was > 0f && runCatching { spec.rarity = 0f }.isSuccess) {
                     undo += { spec.rarity = was }
@@ -168,13 +179,13 @@ object LootBlocker {
         if (commodities.isNotEmpty()) {
             for (spec in settings.allCommoditySpecs) {
                 if (spec == null || !commodities.contains(spec.id)) continue
-                tag(tagsOf { spec.tags }, Tags.NO_DROP)
+                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.INVISIBLE_IN_CODEX)
             }
         }
         if (items.isNotEmpty()) {
             for (spec in settings.allSpecialItemSpecs) {
                 if (spec == null || !items.contains(spec.id)) continue
-                tag(tagsOf { spec.tags }, Tags.NO_DROP)
+                tag(tagsOf { spec.tags }, Tags.NO_DROP, Tags.INVISIBLE_IN_CODEX)
             }
         }
     }

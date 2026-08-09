@@ -163,8 +163,9 @@ object ContentIndex {
                 // Meta commodities (`ships`, `blueprints`, `credits`) are accounting rows for the
                 // economy, not cargo anyone can hold, and the ones vanilla already keeps out of the
                 // codex (`ai_cores`, `survey_data`) are demand-class placeholders in the same vein.
-                // The tag read here is always vanilla's own: we never stamp HIDE_IN_CODEX on
-                // anything -- codex hiding works by pruning entries, not by marking specs.
+                // The tag read here is always vanilla's own. Our codex hiding stamps a different
+                // tag, INVISIBLE_IN_CODEX, so blocking a commodity can never drop it out of the
+                // very list you'd use to unblock it.
                 hidden = runCatching { spec.isMeta }.getOrDefault(false) ||
                     runCatching { spec.hasTag(Tags.HIDE_IN_CODEX) }.getOrDefault(false),
                 sprite = spec.iconName.orEmpty(),

@@ -15,10 +15,22 @@ public class StopBloatingMeModPlugin extends BaseModPlugin {
 
     public static final String MOD_ID = "stopbloatingme";
 
+    /**
+     * Spec-level blocking is applied here as well as on game load, because the codex is generated
+     * once per process during application load and reads visibility off the live spec tags. Applying
+     * it now means the codex is already correct the first time it is opened, campaign or not.
+     */
     @Override
     public void onApplicationLoad() throws Exception {
         Global.getLogger(StopBloatingMeModPlugin.class)
                 .info("StopBloatingMe: application loaded.");
+        // Guarded: a failure here would abort startup, and none of this is worth that.
+        try {
+            LootBlocker.INSTANCE.apply();
+        } catch (Throwable t) {
+            Global.getLogger(StopBloatingMeModPlugin.class)
+                    .error("StopBloatingMe: could not apply spec-level blocking at application load.", t);
+        }
     }
 
     /**
@@ -31,14 +43,4 @@ public class StopBloatingMeModPlugin extends BaseModPlugin {
         Enforcer.onGameLoad();
     }
 
-    /**
-     * Blacklisted entries are pruned from the codex <em>after</em> it is fully built and linked, not
-     * suppressed before it is generated -- see {@link Enforcer#pruneCodex()}. This is the last hook
-     * {@code CodexDataV2.init()} calls, which means every other mod's
-     * {@code onAboutToLinkCodexEntries()} has already run against a complete, vanilla-shaped codex.
-     */
-    @Override
-    public void onCodexDataGenerated() {
-        Enforcer.pruneCodex();
-    }
 }
