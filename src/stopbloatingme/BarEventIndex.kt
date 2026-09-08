@@ -61,10 +61,8 @@ object BarEventIndex {
     // --- Entries -------------------------------------------------------------------------------
 
     private fun fromSpec(spec: BarEventSpec, id: String, sourceMod: String): Entry {
-        // A quest with a matching person-mission spec is contract work that contacts hand out too,
-        // which is worth saying plainly: blocking it here only quiets the bar.
         val mission = runCatching { Global.getSettings().getMissionSpec(id) }.getOrNull()
-        val priority = runCatching { spec.hasTag(Tags.MISSION_PRIORITY) }.getOrDefault(false)
+        val lines = BarQuestText.of(id)
         return Entry(
             id = id,
             name = displayName(runCatching { spec.pluginClass }.getOrNull(), id),
@@ -72,43 +70,30 @@ object BarEventIndex {
             secondary = if (mission != null) "Bar and contacts" else "Bar only",
             design = "",
             sourceMod = sourceMod,
-            hidden = priority,
+            hidden = runCatching { spec.hasTag(Tags.MISSION_PRIORITY) }.getOrDefault(false),
             sprite = runCatching { mission?.icon }.getOrNull().orEmpty(),
-            note = note(alsoFromContacts = mission != null, priority = priority, learned = false),
+            barOption = lines?.option.orEmpty(),
+            barBlurb = lines?.blurb.orEmpty(),
         )
     }
 
-    private fun fromLearned(learned: LearnedBarEvent): Entry = Entry(
-        id = learned.id,
-        name = displayName(learned.className, learned.id),
-        // Code-added creators set their weight in Java rather than in a row we can read, and the
-        // default they inherit is vanilla's 10, so "Common" is the honest answer here.
-        primary = "Common",
-        secondary = "Bar only",
-        design = "",
-        sourceMod = modOf(learned.className),
-        hidden = false,
-        sprite = "",
-        note = note(alsoFromContacts = false, priority = false, learned = true),
-    )
-
-    private fun note(alsoFromContacts: Boolean, priority: Boolean, learned: Boolean): String =
-        buildString {
-            append("Blocking clears the offer out of bars. Quests you have already accepted are ")
-            append("never touched.")
-            if (alsoFromContacts) {
-                append(" Contacts hand this one out as a job as well, and that stays.")
-            }
-            if (learned) {
-                append(" This one is added in code rather than in a data file, so it was picked up ")
-                append("from a campaign you loaded.")
-            }
-            if (priority) {
-                append(" STORY-CRITICAL: the game gives this quest priority over ordinary ones, ")
-                append("which usually means a questline starts here. Blocking it can end that line ")
-                append("before it begins.")
-            }
-        }
+    private fun fromLearned(learned: LearnedBarEvent): Entry {
+        val lines = BarQuestText.of(learned.id)
+        return Entry(
+            id = learned.id,
+            name = displayName(learned.className, learned.id),
+            // Code-added creators set their weight in Java rather than in a row we can read, and the
+            // default they inherit is vanilla's 10, so "Common" is the honest answer here.
+            primary = "Common",
+            secondary = "Bar only",
+            design = "",
+            sourceMod = modOf(learned.className),
+            hidden = false,
+            sprite = "",
+            barOption = lines?.option.orEmpty(),
+            barBlurb = lines?.blurb.orEmpty(),
+        )
+    }
 
     // --- Labels --------------------------------------------------------------------------------
 

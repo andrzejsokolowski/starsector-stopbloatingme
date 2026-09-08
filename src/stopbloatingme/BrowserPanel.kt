@@ -65,7 +65,7 @@ object BrowserPanel {
 
     /** Height of the hover preview strip under the list. Tall enough for a capital's sprite to be
      *  recognisable without stealing more than a few rows from the list. */
-    private const val PREVIEW_H = 172f
+    private const val PREVIEW_H = 200f
     private const val PREVIEW_SPRITE = 150f
     private const val CELL_PAD = 6f
     private const val CELL_TEXT_Y = 3f
@@ -671,6 +671,11 @@ object BrowserPanel {
      * you know the silhouette, not the string, and blocking things you can't identify is how you end
      * up deleting content you wanted.
      *
+     * Bar quests have that problem twice over, because their names are ones this mod invented out of
+     * a class name and nobody has ever seen them. What you remember is the line the bar put in front
+     * of you -- "talk to the hard-drinking spacer" -- so for that tab this panel leads with the
+     * quest's own words and lets the name be the footnote. See [BarQuestText].
+     *
      * Rebuilt only when the hovered entry actually changes, so sweeping the cursor down the list
      * costs one rebuild per row rather than one per frame.
      */
@@ -713,10 +718,32 @@ object BrowserPanel {
                     addPara("$label: %s", 2f, Misc.getBasePlayerColor(), entry.design)
                 }
                 addPara("Source mod: %s", 2f, Misc.getBasePlayerColor(), entry.sourceMod)
-                // Only bar quests set this today: they are the one category where blocking something
-                // needs a sentence of explanation about what it does and doesn't reach.
-                if (entry.note.isNotBlank()) {
-                    addPara(entry.note, Misc.getGrayColor(), 6f)
+                // The words the bar itself puts on screen. For a bar quest this is the only thing
+                // most people recognise -- the name above is a label we made up out of a class
+                // name -- so it gets the emphasis, and the clickable line comes first because that
+                // is the one you read in the bar.
+                if (entry.barOption.isNotBlank()) {
+                    addPara("\"" + entry.barOption + "\"", Misc.getHighlightColor(), 6f)
+                }
+                if (entry.barBlurb.isNotBlank()) {
+                    addPara(entry.barBlurb, Misc.getGrayColor(), 2f)
+                }
+                if (category == Category.BAR_EVENTS) {
+                    if (entry.barOption.isBlank() && entry.barBlurb.isBlank()) {
+                        addPara(
+                            if (BarQuestText.nothingHarvestedYet())
+                                "Load any save once and the bar text for most quests will appear here."
+                            else "This one builds its bar text in code, so there is nothing to read here.",
+                            Misc.getGrayColor(), 6f,
+                        )
+                    }
+                    // Rare and worth a red line: these are the quests a storyline starts from.
+                    if (entry.hidden) {
+                        addPara(
+                            "Story-critical - blocking this can end a questline before it starts.",
+                            BLOCKED_COLOR, 6f,
+                        )
+                    }
                 }
                 addPara(
                     if (blocked) "BLOCKED - click the row to allow it again"

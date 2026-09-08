@@ -55,6 +55,10 @@ object Enforcer {
         // load is also the browser's one chance to find out what this mod list actually has.
         runCatching { BarEventBlocker.learn() }
             .onFailure { log.error("StopBloatingMe: could not read the bar quest pool.", it) }
+        // The words each bar quest shows in the bar live in the dialogue rules, which also only
+        // exist once a sector does. Same deal: read them now, show them at the menu later.
+        runCatching { BarQuestText.harvest() }
+            .onFailure { log.error("StopBloatingMe: could not read bar quest text.", it) }
         runCatching { BarEventBlocker.apply(reason = "game load", verbose = true) }
             .onFailure { log.error("StopBloatingMe: bar quest blocking failed; bars are unfiltered.", it) }
         // Transient on purpose: nothing of ours is ever written into the save, so removing the mod

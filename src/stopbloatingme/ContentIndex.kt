@@ -28,14 +28,20 @@ class Entry(
     /** Sprite path for the hover preview, or "" when the spec doesn't declare one. Resolved at index
      *  time so hovering never has to go back to the spec. */
     val sprite: String = "",
-    /** One extra line for the hover preview, where a category needs to say something the columns
-     *  can't -- currently only bar quests, which have to spell out what blocking one does and does
-     *  not reach. Empty everywhere else, and the preview omits the line. */
-    val note: String = "",
+    /** The line you click on in the bar, and the paragraph the game prints above it. Bar quests
+     *  only -- they are the one category whose entries have no name anyone would recognise, so the
+     *  words themselves have to stand in for one. Empty when [BarQuestText] can't read them, and
+     *  empty for every other category. */
+    val barOption: String = "",
+    val barBlurb: String = "",
 ) {
-    /** Lowercased haystack for the search box: name, id, every facet value, and the source mod. */
+    /**
+     * Lowercased haystack for the search box: name, id, every facet value, the source mod, and --
+     * for bar quests -- the bar text itself, so a half-remembered phrase finds the quest that says
+     * it. That is the only handle most people have on a bar quest.
+     */
     val searchBlob: String =
-        "$name $id $primary $secondary $design $sourceMod".lowercase()
+        "$name $id $primary $secondary $design $sourceMod $barOption $barBlurb".lowercase()
 }
 
 /**
