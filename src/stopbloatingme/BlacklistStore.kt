@@ -6,8 +6,8 @@ import org.json.JSONObject
 import org.lazywizard.lazylib.JSONUtils
 
 /**
- * Per-**installation** storage for the blacklist: which ship hulls, weapons and fighter wings you've
- * told the game to stop showing you.
+ * Per-**installation** storage for the blacklist: every ship, weapon, fighter, commodity, special
+ * item and bar quest you have told the game to stop showing you.
  *
  * Backed by a single JSON file in Starsector's common data folder (`saves/common/` -- see
  * [COMMON_FILE]), never by the save, so curating your collection once carries into every future
@@ -90,7 +90,7 @@ object BlacklistStore {
 
     fun count(category: Category): Int = ids(category).size
 
-    /** Every blocked id across all three categories -- what the reset button is offering to erase. */
+    /** Every blocked id in every category -- what the reset button is offering to erase. */
     fun totalCount(): Int = Category.entries.sumOf { count(it) }
 
     /** Where the store lives, for the "this is shared by every save" note in the UI. */

@@ -34,8 +34,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * The browser: three tabs of every ship, weapon and fighter your mod list defines, with search,
- * facet filters and bulk blacklisting.
+ * The browser: a tab for each kind of thing your mod list defines, with search, facet filters and
+ * bulk blacklisting.
  *
  * Two things drive the design here.
  *
@@ -713,6 +713,11 @@ object BrowserPanel {
                     addPara("$label: %s", 2f, Misc.getBasePlayerColor(), entry.design)
                 }
                 addPara("Source mod: %s", 2f, Misc.getBasePlayerColor(), entry.sourceMod)
+                // Only bar quests set this today: they are the one category where blocking something
+                // needs a sentence of explanation about what it does and doesn't reach.
+                if (entry.note.isNotBlank()) {
+                    addPara(entry.note, Misc.getGrayColor(), 6f)
+                }
                 addPara(
                     if (blocked) "BLOCKED - click the row to allow it again"
                     else "Allowed - click the row to block it",

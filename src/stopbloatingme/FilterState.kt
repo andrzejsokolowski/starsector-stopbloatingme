@@ -138,6 +138,18 @@ object FilterState {
     private val facetCache = HashMap<Pair<Category, FacetGroup>, List<Pair<String, Int>>>()
 
     /**
+     * Drops the derived facet lists and their fold states.
+     *
+     * Called from [ContentIndex.invalidate] when the catalogue itself moves underneath us, which in
+     * practice means one thing: a campaign was loaded and the bar quests that only exist while one
+     * is running became known. Everything here is rebuilt on demand, so clearing is all it takes.
+     */
+    fun invalidateCaches() {
+        facetCache.clear()
+        collapsed.clear()
+    }
+
+    /**
      * Distinct values of [group] within [category], each with how many entries carry it, ordered for
      * display. Size and mount-size get their natural order; everything else falls back to
      * most-common-first so the values worth clicking float to the top of a long list.
@@ -171,6 +183,7 @@ object FilterState {
 
     private val HULL_SIZE_ORDER = rank("Frigate", "Destroyer", "Cruiser", "Capital", "Fighter")
     private val MOUNT_SIZE_ORDER = rank("Small", "Medium", "Large")
+    private val FREQUENCY_ORDER = rank("Very common", "Common", "Uncommon", "Rare", "Never")
 
     private fun rank(vararg values: String): Map<String, Int> =
         values.withIndex().associate { (index, value) -> value to index }
@@ -179,15 +192,17 @@ object FilterState {
      * Facet values are alphabetical, which is the only order you can actually search by eye once a
      * group runs to 99 source mods or a hundred design types.
      *
-     * The two exceptions are genuine scales, where alphabetical would be actively worse: hull size
-     * reads Frigate-to-Capital, not Capital-to-Frigate, and mount size reads Small-to-Large. These
-     * are matched per category *and* group rather than by value, so the ship Designation group -- a
-     * free-text field that happens to contain the words "Frigate" and "Cruiser" among many others --
-     * stays purely alphabetical instead of hoisting four arbitrary entries to the top.
+     * The three exceptions are genuine scales, where alphabetical would be actively worse: hull size
+     * reads Frigate-to-Capital, not Capital-to-Frigate, mount size reads Small-to-Large, and bar
+     * quest frequency reads Very common-to-Rare. These are matched per category *and* group rather
+     * than by value, so the ship Designation group -- a free-text field that happens to contain the
+     * words "Frigate" and "Cruiser" among many others -- stays purely alphabetical instead of
+     * hoisting four arbitrary entries to the top.
      */
     private fun scaleOrder(category: Category, group: FacetGroup): Map<String, Int> = when {
         category == Category.SHIPS && group == FacetGroup.PRIMARY -> HULL_SIZE_ORDER
         category == Category.WEAPONS && group == FacetGroup.SECONDARY -> MOUNT_SIZE_ORDER
+        category == Category.BAR_EVENTS && group == FacetGroup.PRIMARY -> FREQUENCY_ORDER
         else -> emptyMap()
     }
 }

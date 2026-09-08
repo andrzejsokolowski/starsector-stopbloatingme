@@ -13,7 +13,7 @@ import com.fs.starfarer.api.util.IntervalUtil
  * The half of the mod that actually changes the game: takes what [BlacklistStore] says and removes
  * it from play.
  *
- * Four layers, because no single lever covers everything:
+ * Five layers, because no single lever covers everything:
  *
  * 1. **Faction known-lists** ([stripFactions]) -- the primary lever for spawning. Fleet composition
  *    and vanilla market stock are both driven by each faction's known ships/weapons/fighters, so
@@ -29,6 +29,10 @@ import com.fs.starfarer.api.util.IntervalUtil
  *    faction lists, so commodities, special items, weapons and fighters are kept out of it by
  *    zeroing drop-table weights and stamping the `no_drop` tags vanilla already honours. The same
  *    pass stamps `invisible_in_codex`, which is all the codex hiding this mod does now.
+ * 5. **Bar quest blocking** ([BarEventBlocker]) -- bars run on their own pool of quest types that
+ *    has nothing to do with any of the above, so blocked ones are held down on the game's own
+ *    cooldown list and any offer they already made is pulled off the shelf. Nothing is destroyed
+ *    and nothing outlives the mod. Quests already accepted are never touched.
  *
  * Ships are stripped everywhere (fleets, markets and loot); weapons and fighters stop being stocked
  * and stop dropping, but their specs stay loaded and predefined `.variant` loadouts keep working,
@@ -47,6 +51,12 @@ object Enforcer {
         // can change the blacklist at the main menu between two saves in the same session.
         runCatching { LootBlocker.apply() }
             .onFailure { log.error("StopBloatingMe: loot blocking failed; drops are unfiltered.", it) }
+        // A campaign is the only place the quest types added in code can be seen at all, so every
+        // load is also the browser's one chance to find out what this mod list actually has.
+        runCatching { BarEventBlocker.learn() }
+            .onFailure { log.error("StopBloatingMe: could not read the bar quest pool.", it) }
+        runCatching { BarEventBlocker.apply(reason = "game load", verbose = true) }
+            .onFailure { log.error("StopBloatingMe: bar quest blocking failed; bars are unfiltered.", it) }
         // Transient on purpose: nothing of ours is ever written into the save, so removing the mod
         // can never corrupt one. The plugin re-adds all three on every load.
         sector.addTransientScript(EnforcerScript())
@@ -136,12 +146,21 @@ object Enforcer {
 }
 
 /**
- * Re-strips faction lists roughly once a game day, catching blueprints factions acquire mid-game.
- * A full pass is a handful of set operations per faction, so this is effectively free.
+ * The mod's heartbeat inside a campaign, on two different clocks.
+ *
+ * Faction lists get re-stripped roughly once a game day, catching blueprints factions acquire
+ * mid-game. A full pass is a handful of set operations per faction, so this is effectively free.
+ *
+ * Bar quests get swept about four times as often, because their window is tighter: the game picks a
+ * new bar offer every half day or so, and mod plugins that add their own quest types run in
+ * mod-list order, which can put them after us on a load. Sweeping faster than the game generates
+ * means a quest type registered late never gets a chance to hand out an offer. The cost is a scan
+ * of a list of about fifty.
  */
 class EnforcerScript : EveryFrameScript {
 
     private val interval = IntervalUtil(0.8f, 1.2f)
+    private val barInterval = IntervalUtil(0.2f, 0.3f)
 
     override fun isDone(): Boolean = false
 
@@ -152,6 +171,11 @@ class EnforcerScript : EveryFrameScript {
         interval.advance(days)
         if (interval.intervalElapsed()) {
             Enforcer.stripFactions(reason = "daily")
+        }
+        barInterval.advance(days)
+        if (barInterval.intervalElapsed()) {
+            runCatching { BarEventBlocker.learn() }
+            runCatching { BarEventBlocker.apply(reason = "sweep") }
         }
     }
 }

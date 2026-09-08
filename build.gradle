@@ -42,3 +42,50 @@ jar {
     // Do not embed the Kotlin stdlib — LazyLib provides it. This keeps the jar small and
     // avoids classloader conflicts with other Kotlin mods.
 }
+
+// Starsector's script classloader refuses java.io, java.nio.file and java.lang.reflect to mod code
+// and kills the game with "File access and reflection are not allowed to scripts". The rejection
+// happens at class resolution, so it lands wherever the offending class is first reached -- a button
+// click, or startup -- rather than where the mistake was made. That is far too easy to ship, and
+// this mod now calls SettingsAPI.loadCSV, which declares IOException: catching it by name is enough
+// to trip the loader. Fail the build instead.
+tasks.register('checkNoForbiddenApis') {
+    dependsOn tasks.named('classes')
+    def classesDirs = [
+        layout.buildDirectory.dir('classes/kotlin/main'),
+        layout.buildDirectory.dir('classes/java/main'),
+    ]
+    def banned = ['java/io/', 'java/nio/file/', 'java/lang/reflect/']
+    // Starficz's framework reflects on the game's own classes on purpose, which the loader permits.
+    def exemptPackages = ['stopbloatingme/uiframework/']
+    outputs.upToDateWhen { false }
+    doLast {
+        def offenders = [:]
+        classesDirs.each { dir ->
+            def root = dir.get().asFile
+            if (!root.isDirectory()) return
+            root.eachFileRecurse { file ->
+                if (!file.name.endsWith('.class')) return
+                def rel = root.toPath().relativize(file.toPath()).toString().replace(File.separator, '/')
+                if (exemptPackages.any { rel.startsWith(it) }) return
+                // Class names live as plain text in the constant pool, so a byte scan needs no ASM.
+                // It over-approximates, which is the safe direction for a guard whose failure mode
+                // is a fatal dialog box.
+                def text = new String(file.readBytes(), 'ISO-8859-1')
+                def hits = banned.findAll { text.contains(it) }
+                if (hits) offenders[rel] = hits
+            }
+        }
+        if (offenders) {
+            def detail = offenders.collect { k, v -> "  ${k}: ${v.join(', ')}" }.join('\n')
+            throw new GradleException(
+                "Forbidden APIs in mod classes -- Starsector's classloader refuses these and the " +
+                "game will die with \"File access and reflection are not allowed to scripts\":\n" +
+                detail + "\n" +
+                "Use Global.getSettings() for file access; it reaches saves/common only. Never name " +
+                "a java.io type, not even in a catch clause -- wrap the call in runCatching instead.")
+        }
+    }
+}
+
+tasks.named('jar') { dependsOn 'checkNoForbiddenApis' }

@@ -28,6 +28,10 @@ class Entry(
     /** Sprite path for the hover preview, or "" when the spec doesn't declare one. Resolved at index
      *  time so hovering never has to go back to the spec. */
     val sprite: String = "",
+    /** One extra line for the hover preview, where a category needs to say something the columns
+     *  can't -- currently only bar quests, which have to spell out what blocking one does and does
+     *  not reach. Empty everywhere else, and the preview omits the line. */
+    val note: String = "",
 ) {
     /** Lowercased haystack for the search box: name, id, every facet value, and the source mod. */
     val searchBlob: String =
@@ -35,8 +39,8 @@ class Entry(
 }
 
 /**
- * The catalogue of every ship hull, weapon, fighter wing, commodity and special item the current mod
- * list defines.
+ * The catalogue of every ship hull, weapon, fighter wing, commodity, special item and bar quest the
+ * current mod list defines.
  *
  * Built once and cached for the rest of the process. The spike measured a full scan of the three
  * big categories at **5 ms** on a 244-mod install (8,644 hulls / 1,801 weapons / 667 wings), and
@@ -44,8 +48,10 @@ class Entry(
  * and no background thread here -- it is cheaper to just build it than to manage the machinery for
  * not building it.
  *
- * Source mod comes straight off the spec: all five spec types implement `WithSourceMod`, so
+ * Source mod comes straight off the spec: all five of those spec types implement `WithSourceMod`, so
  * attribution needs no CSV parsing. Specs with no source mod are vanilla.
+ * Bar quests are the exception: a `BarEventSpec` carries no source mod at all, so [BarEventIndex]
+ * has to work theirs out by hand.
  */
 object ContentIndex {
 
@@ -56,9 +62,17 @@ object ContentIndex {
 
     fun entries(category: Category): List<Entry> = index()[category].orEmpty()
 
-    /** Drops the cache. Only needed if specs are ever reloaded mid-process. */
+    /**
+     * Drops the cache so the next read rebuilds it.
+     *
+     * Called when [BarEventIndex] learns a bar quest that only exists once a campaign is running --
+     * the browser is open at the main menu, so its list would otherwise stay a session behind. Also
+     * clears the browser's derived facet lists, which are computed from this index and would go
+     * stale with it.
+     */
     fun invalidate() {
         cache = null
+        FilterState.invalidateCaches()
     }
 
     private fun index(): Map<Category, List<Entry>> {
@@ -70,6 +84,7 @@ object ContentIndex {
             Category.FIGHTERS to buildFighters(),
             Category.COMMODITIES to buildCommodities(),
             Category.ITEMS to buildItems(),
+            Category.BAR_EVENTS to BarEventIndex.build(),
         )
         cache = built
         Global.getLogger(ContentIndex::class.java).info(
