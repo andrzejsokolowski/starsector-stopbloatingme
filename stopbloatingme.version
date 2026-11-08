@@ -1,5 +1,6 @@
 {
     "masterVersionFile":"https://raw.githubusercontent.com/andrzejsokolowski/starsector-stopbloatingme/main/stopbloatingme.version",
+    "changelogURL":"https://raw.githubusercontent.com/andrzejsokolowski/starsector-stopbloatingme/main/changelog.txt",
     "modName":"StopBloatingMe",
     "modThreadId":35850,
     "modVersion":
