@@ -12,8 +12,7 @@ under **Starsector mods** (`collection://f3c9bb39-0b63-4fd8-ad9a-2354d93cbc85`).
 game API notes, including "Game API: bar events": **Claude Information**
 (`collection://7bf9b1d6-b9e5-4b62-87f1-757bbaa51919`), starting with "Start here: working on
 Starsector mods through Notion". Read the board before working, give every task a ticket (ticket
-ids start with SBM) and keep it current. StopBloatingMe is also bundled in Coalesced Little Mods:
-bring every change over there too. The Notion tools are deferred: load them with ToolSearch first.
+ids start with SBM) and keep it current. The Notion tools are deferred: load them with ToolSearch first.
 
 Update the board during the work, not only at release time. Before changing files, put the
 message on its ticket: a new request gets a new ticket (In progress), and a problem Andrzej
