@@ -1,3 +1,4 @@
+[center][img width=128]https://raw.githubusercontent.com/andrzejsokolowski/starsector-stopbloatingme/main/icon.png[/img][/center]
 [center][size=28pt][url=https://github.com/andrzejsokolowski/starsector-stopbloatingme/releases/latest][b]StopBloatingMe[/b][/url][/size]
 [url=https://github.com/andrzejsokolowski/starsector-stopbloatingme/releases/latest][img]https://img.shields.io/github/downloads/andrzejsokolowski/starsector-stopbloatingme/total?style=for-the-badge&label=download[/img][/url]  [url=https://github.com/andrzejsokolowski/starsector-stopbloatingme][img]https://img.shields.io/github/v/release/andrzejsokolowski/starsector-stopbloatingme?display_name=tag&sort=semver&style=for-the-badge&label=source[/img][/url]
 [/center]
@@ -95,6 +96,9 @@ The UIFramework code by Starficz inside it keeps its own licence (LGPL-3.0).
 [/spoiler]
 
 [spoiler=Version log]
+1.0.1
+New gold icon in mod managers (TriOS).
+
 0.7.2
 Linked the mod to this forum thread and added the in-launcher update check URL.
 

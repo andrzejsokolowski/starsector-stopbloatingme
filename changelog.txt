@@ -1,3 +1,6 @@
+Version 1.0.1 (2026-11-10)
+- New gold icon in mod managers (TriOS).
+
 Version 1.0.0 (2026-09-08)
 - Bar quests can be blocked too (0.9.0), and the list shows each bar quest's bar text (0.10.0).
 
