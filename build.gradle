@@ -27,13 +27,13 @@ dependencies {
     compileOnly fileTree(dir: "${starsectorPath}/starsector-core", include: '*.jar')
 
     // Library mods we depend on
-    compileOnly fileTree(dir: "${starsectorPath}/mods/LunaLib-2.0.5/jars", include: '*.jar')
-    compileOnly fileTree(dir: "${starsectorPath}/mods/LazyLib-3.0.0/jars", include: '*.jar')
+    compileOnly fileTree(dir: "${starsectorPath}/mods", include: '**/LunaLib*/jars/LunaLib.jar')
+    compileOnly fileTree(dir: "${starsectorPath}/mods", include: '**/LazyLib*/jars/LazyLib*.jar')
 
     // Kotlin runtime is provided AT RUNTIME by LazyLib (jars/internal/Kotlin-Runtime.jar) on
     // Starsector's shared classloader, so we compile against it but must NOT bundle our own copy.
     // kotlin.stdlib.default.dependency=false (in gradle.properties) prevents the plugin from adding one.
-    compileOnly files("${starsectorPath}/mods/LazyLib-3.0.0/jars/internal/Kotlin-Runtime.jar")
+    compileOnly fileTree(dir: "${starsectorPath}/mods", include: '**/LazyLib*/jars/internal/Kotlin-Runtime.jar')
 }
 
 jar {

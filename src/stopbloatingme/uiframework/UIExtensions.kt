@@ -26,8 +26,8 @@ internal var UIComponentAPI.opacity: Float
     set(alpha) { invoke("setOpacity", alpha) }
 
 internal var UIComponentAPI.parent: UIPanelAPI?
-    get() = invoke("getParent") as UIPanelAPI?
-    set(parent) { invoke("setParent", parent) }
+    get() = getParent()
+    set(parent) { setParent2(parent) }
 
 internal fun UIComponentAPI.setMouseOverPad(pad1: Float, pad2: Float, pad3: Float, pad4: Float) {
     invoke("setMouseOverPad", pad1, pad2, pad3, pad4)
@@ -270,7 +270,7 @@ internal fun UIPanelAPI.clearChildren() {
 abstract class BoxedUIElement(val boxedElement: UIComponentAPI)
 
 class BoxedUILabel(val uiLabel: LabelAPI): BoxedUIElement(uiLabel as UIComponentAPI),
-    UIComponentAPI by (uiLabel as UIComponentAPI), LabelAPI by uiLabel {
+    LabelAPI by uiLabel {
     override fun advance(amount: Float) { uiLabel.advance(amount) }
     override fun getOpacity() = uiLabel.opacity
     override fun setOpacity(opacity: Float) { uiLabel.opacity = opacity }
