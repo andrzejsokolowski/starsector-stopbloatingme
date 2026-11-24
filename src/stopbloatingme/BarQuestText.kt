@@ -4,6 +4,9 @@ import com.fs.starfarer.api.Global
 import com.fs.starfarer.api.campaign.rules.MemKeys
 import com.fs.starfarer.api.campaign.rules.MemoryAPI
 import com.fs.starfarer.api.campaign.rules.RulesAPI
+import org.apache.log4j.Level
+import org.apache.log4j.LogManager
+import org.apache.log4j.Logger
 import org.json.JSONArray
 import org.json.JSONObject
 import org.lazywizard.lazylib.JSONUtils
@@ -138,15 +141,20 @@ object BarQuestText {
         }.getOrNull() ?: return
 
         var changed = false
-        for (id in questIds()) {
-            val found = runCatching { read(rules, memory, id) }.getOrNull() ?: continue
-            if (found.isEmpty()) continue
-            val existing = known[id]
-            if (existing != null && existing.option == found.option && existing.blurb == found.blurb) {
-                continue
+        val restoreWarnings = muteRuleWarnings()
+        try {
+            for (id in questIds()) {
+                val found = runCatching { read(rules, memory, id) }.getOrNull() ?: continue
+                if (found.isEmpty()) continue
+                val existing = known[id]
+                if (existing != null && existing.option == found.option && existing.blurb == found.blurb) {
+                    continue
+                }
+                known[id] = found
+                changed = true
             }
-            known[id] = found
-            changed = true
+        } finally {
+            restoreWarnings()
         }
         if (changed) {
             save()
@@ -154,6 +162,36 @@ object BarQuestText {
             ContentIndex.invalidate()
         }
     }
+
+    /**
+     * Turns the game's rule-engine warnings down to errors for the length of the harvest, and returns
+     * the function that puts them back exactly as they were.
+     *
+     * A rule whose condition reads `$market.size` or `$faction.id` finds no market or faction out
+     * here, so the engine counts it as not matching -- the answer we want, see [harvest]. But it also
+     * writes a warning with a full stack trace for every such condition: 16 per save load on a big mod
+     * list, which buries the lines that matter when someone sends a log. Giving the engine an empty
+     * local memory instead would silence it too, but then a condition like `!$market.isFreePort` turns
+     * true and a variant written for one kind of market could replace the general text.
+     *
+     * The engine's class names change between game builds, so this goes by the package. Loggers
+     * below it with a level of their own get turned down too; the rest take it from the package.
+     */
+    private fun muteRuleWarnings(): () -> Unit {
+        val saved = runCatching {
+            val loggers = mutableListOf(Logger.getLogger(RULES_PACKAGE))
+            val current = LogManager.getCurrentLoggers()
+            while (current.hasMoreElements()) {
+                val logger = current.nextElement() as? Logger ?: continue
+                if (logger.name.startsWith("$RULES_PACKAGE.") && logger.level != null) loggers.add(logger)
+            }
+            loggers.map { it to it.level }
+        }.getOrNull().orEmpty()
+        runCatching { saved.forEach { (logger, _) -> logger.level = Level.ERROR } }
+        return { runCatching { saved.forEach { (logger, level) -> logger.level = level } } }
+    }
+
+    private const val RULES_PACKAGE = "com.fs.starfarer.campaign.rules"
 
     private fun read(rules: RulesAPI, memory: Map<String, MemoryAPI>, id: String): BarQuestLines {
         val blurb = rules.matching(memory, id + BLURB_TRIGGER)

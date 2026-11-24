@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 build/
+.kotlin/
 
 # Claude / planning scratch
 .claude/

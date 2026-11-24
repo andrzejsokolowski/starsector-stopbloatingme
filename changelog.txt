@@ -1,3 +1,6 @@
+Version 1.1.1 (2026-11-24)
+- Loading a save no longer fills starsector.log with "No memory found for keys" warnings while the mod reads the bar quest texts.
+
 Version 1.1.0 (2026-11-15)
 - Updated for Starsector 0.98.5a.
 
